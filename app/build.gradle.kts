@@ -9,6 +9,10 @@ plugins {
     id("androidx.room")
     id("org.jetbrains.kotlin.plugin.serialization")
     id("com.google.android.libraries.mapsplatform.secrets-gradle-plugin")
+    id("io.gitlab.arturbosch.detekt")
+    id("com.github.spotbugs")
+    id("org.owasp.dependencycheck")
+    id("jacoco")
 }
 
 android {
@@ -22,7 +26,7 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunner = "com.fitnessapp.testing.HiltTestRunner"
         vectorDrawables {
             useSupportLibrary = true
         }
@@ -302,4 +306,127 @@ dependencies {
     
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+}
+
+// Plugin Configurations
+
+// Detekt static analysis
+detekt {
+    buildUponDefaultConfig = true
+    allRules = false
+    config.setFrom("$projectDir/../config/detekt.yml")
+    baseline.set(file("$projectDir/detekt-baseline.xml"))
+    
+    reports {
+        html.required.set(true)
+        xml.required.set(true)
+        txt.required.set(false)
+        sarif.required.set(true)
+        md.required.set(false)
+    }
+}
+
+// SpotBugs configuration
+spotbugs {
+    ignoreFailures.set(false)
+    effort.set("max")
+    reportLevel.set("medium")
+    excludeFilter.set(file("$projectDir/../config/spotbugs-exclude.xml"))
+    
+    reports {
+        create("html") {
+            required.set(true)
+            outputLocation.set(file("$buildDir/reports/spotbugs/spotbugs.html"))
+        }
+        create("xml") {
+            required.set(true)
+            outputLocation.set(file("$buildDir/reports/spotbugs/spotbugs.xml"))
+        }
+    }
+}
+
+// OWASP Dependency Check
+dependencyCheck {
+    format = "ALL"
+    suppressionFile = "$projectDir/../config/dependency-check-suppressions.xml"
+    analyzers {
+        experimentalEnabled = true
+        archiveEnabled = true
+        jarEnabled = true
+        centralEnabled = true
+        nexusEnabled = false
+        pyDistributionEnabled = false
+        pyPackageEnabled = false
+        rubygemsEnabled = false
+        opensslEnabled = false
+        cmakeEnabled = false
+        autoconfEnabled = false
+        composerEnabled = false
+        nodeEnabled = false
+        nodeAuditEnabled = false
+        nuspecEnabled = false
+        nugetconfEnabled = false
+        assemblyEnabled = false
+        msbuildEnabled = false
+        cocoapodsEnabled = false
+        swiftEnabled = false
+        bundleAuditEnabled = false
+        pathToGo = ""
+        pathToCore = ""
+        golangDepEnabled = false
+        golangModEnabled = false
+    }
+    
+    nvd {
+        apiKey = project.findProperty("nvdApiKey") as String? ?: System.getenv("NVD_API_KEY") ?: ""
+        delay = 16000
+    }
+}
+
+// Jacoco code coverage
+jacoco {
+    toolVersion = "0.8.11"
+    reportsDirectory.set(layout.buildDirectory.dir("reports/jacoco"))
+}
+
+tasks.register("jacocoTestReport", JacocoReport::class) {
+    dependsOn("testDevelopmentDebugUnitTest")
+    
+    reports {
+        xml.required.set(true)
+        html.required.set(true)
+        csv.required.set(false)
+    }
+    
+    val fileFilter = listOf(
+        "**/R.class",
+        "**/R$*.class",
+        "**/BuildConfig.*",
+        "**/Manifest*.*",
+        "**/*Test*.*",
+        "android/**/*.*",
+        "**/databinding/*",
+        "**/generated/**/*.*"
+    )
+    
+    val debugTree = fileTree("$buildDir/intermediates/javac/developmentDebug/classes") {
+        exclude(fileFilter)
+    }
+    val kotlinDebugTree = fileTree("$buildDir/tmp/kotlin-classes/developmentDebug") {
+        exclude(fileFilter)
+    }
+    
+    classDirectories.setFrom(files(listOf(debugTree, kotlinDebugTree)))
+    sourceDirectories.setFrom(files(listOf(
+        "$projectDir/src/main/java",
+        "$projectDir/src/main/kotlin"
+    )))
+    executionData.setFrom(fileTree("$buildDir/jacoco") {
+        include("**/*.exec")
+    })
+}
+
+// Room schema export
+room {
+    schemaDirectory("$projectDir/schemas")
 }

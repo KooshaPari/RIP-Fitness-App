@@ -119,10 +119,11 @@
             android:exported="false"
             android:foregroundServiceType="health" />
             
-        <service
+        <!-- WorkoutTimerService will be implemented later -->
+        <!--<service
             android:name=".service.WorkoutTimerService"
             android:exported="false"
-            android:foregroundServiceType="health" />
+            android:foregroundServiceType="health" />-->
             
         <service
             android:name=".service.NotificationService"
@@ -175,14 +176,14 @@
                 android:resource="@xml/workout_widget_info" />
         </receiver>
 
-        <!-- Firebase messaging -->
-        <service
+        <!-- Firebase messaging will be implemented later -->
+        <!--<service
             android:name=".service.FitnessFirebaseMessagingService"
             android:exported="false">
             <intent-filter>
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
-        </service>
+        </service>-->
 
         <!-- Work Manager -->
         <provider

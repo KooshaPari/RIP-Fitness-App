@@ -18,7 +18,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import timber.log.Timber
+// Remove Timber import - not configured yet
+// import timber.log.Timber
 import javax.inject.Inject
 
 /**
@@ -52,7 +53,7 @@ class FitnessApplication : Application(), Configuration.Provider {
         // Initialize background work
         initializeBackgroundWork()
         
-        Timber.i("FitnessApplication initialized successfully")
+        // Timber.i("FitnessApplication initialized successfully")
     }
     
     override fun getWorkManagerConfiguration(): Configuration {
@@ -63,6 +64,8 @@ class FitnessApplication : Application(), Configuration.Provider {
     }
     
     private fun initializeLogging() {
+        // Configure logging when Timber is properly set up
+        /*
         if (BuildConfig.DEBUG) {
             Timber.plant(Timber.DebugTree())
         } else {
@@ -77,6 +80,7 @@ class FitnessApplication : Application(), Configuration.Provider {
                 }
             })
         }
+        */
     }
     
     private fun createNotificationChannels() {
@@ -133,7 +137,7 @@ class FitnessApplication : Application(), Configuration.Provider {
             )
             
             notificationManager.createNotificationChannels(channels)
-            Timber.d("Created ${channels.size} notification channels")
+            // Timber.d("Created ${channels.size} notification channels")
         }
     }
     
@@ -149,9 +153,9 @@ class FitnessApplication : Application(), Configuration.Provider {
                 // Schedule nutrition reminders
                 NutritionReminderWorker.scheduleReminders()
                 
-                Timber.d("Background work scheduled successfully")
+                // Timber.d("Background work scheduled successfully")
             } catch (e: Exception) {
-                Timber.e(e, "Failed to initialize background work")
+                // Timber.e(e, "Failed to initialize background work")
             }
         }
     }

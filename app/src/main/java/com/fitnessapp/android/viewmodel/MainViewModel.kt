@@ -12,7 +12,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
-import timber.log.Timber
+// Remove Timber import - not configured yet
+// import timber.log.Timber
 import java.time.LocalDateTime
 import javax.inject.Inject
 
@@ -64,7 +65,7 @@ class MainViewModel @Inject constructor(
                     _isLoading.value = false
                 }
             } catch (e: Exception) {
-                Timber.e(e, "Failed to initialize ViewModel")
+                // Timber.e(e, "Failed to initialize ViewModel")
                 updateUiState { it.copy(hasError = true, errorMessage = e.message, isLoading = false) }
                 _isLoading.value = false
             }
@@ -102,22 +103,40 @@ class MainViewModel @Inject constructor(
                 val existingUser = fitnessRepository.getUser()
                 if (existingUser == null) {
                     val defaultUser = UserEntity(
-                        id = 1,
-                        name = "User",
-                        email = "",
+                        userId = "1",
+                        username = "user",
+                        email = "user@example.com",
+                        firstName = "Default",
+                        lastName = "User",
                         dateOfBirth = null,
                         gender = null,
-                        height = null,
+                        heightCm = null,
                         activityLevel = null,
-                        onboardingCompleted = true,
+                        fitnessExperience = null,
+                        healthKitEnabled = false,
+                        googleFitEnabled = false,
+                        wearableConnected = false,
+                        tdeeCalculationMethod = "adaptive",
+                        metabolicAdaptationEnabled = true,
+                        isPremium = false,
+                        subscriptionType = null,
+                        subscriptionExpiresAt = null,
+                        profileVisibility = "private",
+                        dataSharingConsent = false,
                         createdAt = LocalDateTime.now(),
-                        updatedAt = LocalDateTime.now()
+                        updatedAt = LocalDateTime.now(),
+                        lastActiveAt = LocalDateTime.now(),
+                        emailVerifiedAt = LocalDateTime.now(),
+                        onboardingCompleted = true,
+                        initialGoalsSet = true,
+                        firstWorkoutCompleted = false,
+                        nutritionTrackingEnabled = true
                     )
                     fitnessRepository.insertUser(defaultUser)
                     
                     // Create default goals
                     val defaultGoals = UserGoalsEntity(
-                        userId = 1,
+                        userId = "1",
                         targetWeight = null,
                         dailyCalorieGoal = 2000,
                         dailyProteinGoal = 150,
@@ -135,7 +154,7 @@ class MainViewModel @Inject constructor(
                 
                 updateUiState { it.copy(showOnboarding = false) }
             } catch (e: Exception) {
-                Timber.e(e, "Failed to complete onboarding")
+                // Timber.e(e, "Failed to complete onboarding")
                 setError("Failed to complete setup: ${e.message}")
             }
         }
@@ -147,7 +166,7 @@ class MainViewModel @Inject constructor(
                 val user = fitnessRepository.getUser()
                 updateUiState { it.copy(user = user) }
             } catch (e: Exception) {
-                Timber.e(e, "Failed to initialize user data")
+                // Timber.e(e, "Failed to initialize user data")
             }
         }
     }

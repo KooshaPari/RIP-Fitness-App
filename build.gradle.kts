@@ -11,11 +11,16 @@ plugins {
     id("com.google.firebase.firebase-perf") version "1.4.2" apply false
     id("androidx.room") version "2.5.2" apply false
     id("org.jetbrains.kotlin.plugin.serialization") version "1.9.10" apply false
+    id("io.gitlab.arturbosch.detekt") version "1.23.4" apply false
+    id("com.github.spotbugs") version "5.2.1" apply false
+    id("org.owasp.dependencycheck") version "9.0.9" apply false
+    id("jacoco") apply false
 }
 
 buildscript {
     dependencies {
         classpath("com.google.android.libraries.mapsplatform.secrets-gradle-plugin:secrets-gradle-plugin:2.0.1")
+        classpath("com.github.ben-manes:gradle-versions-plugin:0.51.0")
     }
 }
 

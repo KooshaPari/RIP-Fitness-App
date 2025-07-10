@@ -43,7 +43,7 @@ jobs:
         distribution: 'temurin'
 
     - name: Cache Gradle dependencies
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           ~/.gradle/caches
@@ -78,7 +78,7 @@ jobs:
         fi
 
     - name: Upload vulnerability report
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: vulnerability-report
@@ -105,7 +105,7 @@ jobs:
         distribution: 'temurin'
 
     - name: Cache Gradle dependencies
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           ~/.gradle/caches
@@ -123,9 +123,10 @@ jobs:
         # Create Gradle script to check for updates
         cat > check-updates.gradle << 'EOF'
         plugins {
-          id 'com.github.ben-manes.versions' version '0.50.0'
+          id 'com.github.ben-manes.versions' version '0.51.0'
         }
         
+        apply plugin: 'kotlin-android'
         apply from: 'build.gradle.kts'
         
         dependencyUpdates {
@@ -167,7 +168,7 @@ jobs:
         fi
 
     - name: Upload update report
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: dependency-updates-report
@@ -194,7 +195,7 @@ jobs:
         distribution: 'temurin'
 
     - name: Cache Gradle dependencies
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           ~/.gradle/caches
@@ -219,7 +220,7 @@ jobs:
         # Update Gradle wrapper if vulnerable
         GRADLE_VERSION=$(./gradlew -v | grep "Gradle" | cut -d' ' -f2)
         if [[ "$GRADLE_VERSION" < "8.0" ]]; then
-          ./gradlew wrapper --gradle-version=8.5
+          ./gradlew wrapper --gradle-version=8.10.2
           UPDATED_FILES="$UPDATED_FILES gradle/wrapper/gradle-wrapper.properties"
         fi
         
@@ -227,10 +228,10 @@ jobs:
         for BUILD_FILE in app/build.gradle.kts core/*/build.gradle.kts; do
           if [ -f "$BUILD_FILE" ]; then
             # Update OkHttp to latest secure version
-            sed -i 's/okhttp:4\.[0-9]\+\.[0-9]\+/okhttp:4.12.0/g' "$BUILD_FILE"
+            sed -i 's/okhttp3:4\.[0-9]\+\.[0-9]\+/okhttp3:4.12.0/g' "$BUILD_FILE"
             
             # Update Retrofit to latest secure version
-            sed -i 's/retrofit:2\.[0-9]\+\.[0-9]\+/retrofit:2.9.0/g' "$BUILD_FILE"
+            sed -i 's/retrofit2:2\.[0-9]\+\.[0-9]\+/retrofit2:2.11.0/g' "$BUILD_FILE"
             
             # Update Jackson if present (known vulnerabilities)
             sed -i 's/jackson-databind:2\.[0-9]\+\.[0-9]\+/jackson-databind:2.16.1/g' "$BUILD_FILE"
@@ -311,7 +312,7 @@ jobs:
         distribution: 'temurin'
 
     - name: Cache Gradle dependencies
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           ~/.gradle/caches
@@ -330,7 +331,7 @@ jobs:
         # Use Gradle versions plugin to apply updates
         cat > apply-updates.gradle << 'EOF'
         plugins {
-          id 'com.github.ben-manes.versions' version '0.50.0'
+          id 'com.github.ben-manes.versions' version '0.51.0'
           id 'se.patrikerdes.use-latest-versions' version '0.2.18'
         }
         

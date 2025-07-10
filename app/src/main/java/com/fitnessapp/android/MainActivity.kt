@@ -15,7 +15,10 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
@@ -29,7 +32,8 @@ import com.fitnessapp.android.viewmodel.MainViewModel
 import com.fitnessapp.feature.health.permissions.HealthPermissionsManager
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
-import timber.log.Timber
+// Remove Timber import - not configured yet
+// import timber.log.Timber
 import javax.inject.Inject
 
 /**
@@ -63,7 +67,7 @@ class MainActivity : ComponentActivity() {
     ) { permissions ->
         permissions.forEach { (permission, granted) ->
             permissionManager.updatePermissionState(permission, granted)
-            Timber.d("Permission $permission: ${if (granted) "granted" else "denied"}")
+            // Timber.d("Permission $permission: ${if (granted) "granted" else "denied"}")
         }
         
         if (!permissionManager.hasAllRequiredPermissions()) {
@@ -77,7 +81,7 @@ class MainActivity : ComponentActivity() {
     private val healthConnectPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        Timber.d("Health Connect permission result: ${result.resultCode}")
+        // Timber.d("Health Connect permission result: ${result.resultCode}")
         lifecycleScope.launch {
             healthPermissionsManager.checkPermissions()
             viewModel.onHealthPermissionsChecked()
@@ -136,9 +140,9 @@ class MainActivity : ComponentActivity() {
                 // Initialize user data if needed
                 viewModel.initializeUserData()
                 
-                Timber.i("App initialization completed")
+                // Timber.i("App initialization completed")
             } catch (e: Exception) {
-                Timber.e(e, "App initialization failed")
+                // Timber.e(e, "App initialization failed")
                 viewModel.setError("Failed to initialize app: ${e.message}")
             }
         }
@@ -170,7 +174,7 @@ class MainActivity : ComponentActivity() {
                 val permissionIntent = healthPermissionsManager.getPermissionIntent()
                 healthConnectPermissionLauncher.launch(permissionIntent)
             } catch (e: Exception) {
-                Timber.e(e, "Failed to request Health Connect permissions")
+                // Timber.e(e, "Failed to request Health Connect permissions")
                 viewModel.setError("Failed to request health permissions")
             }
         }
@@ -207,7 +211,7 @@ class MainActivity : ComponentActivity() {
     }
     
     private fun handleDeepLink(uri: Uri) {
-        Timber.d("Handling deep link: $uri")
+        // Timber.d("Handling deep link: $uri")
         
         when (uri.pathSegments.firstOrNull()) {
             "workout" -> {
