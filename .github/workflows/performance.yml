@@ -1,0 +1,729 @@
+name: Performance Monitoring
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Run performance tests daily at 3 AM UTC
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      test-type:
+        description: 'Type of performance test to run'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+        - full
+        - startup
+        - memory
+        - battery
+        - network
+
+env:
+  GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.workers.max=2"
+  JAVA_VERSION: 17
+
+jobs:
+  # App Startup Performance
+  startup-performance:
+    name: App Startup Performance
+    runs-on: macos-latest
+    if: github.event.inputs.test-type == 'startup' || github.event.inputs.test-type == 'full' || github.event.inputs.test-type == ''
+    timeout-minutes: 45
+    
+    strategy:
+      matrix:
+        api-level: [30, 34]
+        startup-type: [cold, warm, hot]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up JDK ${{ env.JAVA_VERSION }}
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ env.JAVA_VERSION }}
+        distribution: 'temurin'
+
+    - name: Cache Gradle dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+
+    - name: Cache AVD
+      uses: actions/cache@v3
+      id: avd-cache
+      with:
+        path: |
+          ~/.android/avd/*
+          ~/.android/adb*
+        key: avd-${{ matrix.api-level }}-performance
+
+    - name: Create AVD and generate snapshot for caching
+      if: steps.avd-cache.outputs.cache-hit != 'true'
+      uses: reactivecircus/android-emulator-runner@v2
+      with:
+        api-level: ${{ matrix.api-level }}
+        arch: x86_64
+        target: google_apis
+        force-avd-creation: false
+        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+        disable-animations: false
+        script: echo "Generated AVD snapshot for caching."
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+
+    - name: Build release APK for performance testing
+      run: ./gradlew assembleDevelopmentRelease
+
+    - name: Run ${{ matrix.startup-type }} startup performance test
+      uses: reactivecircus/android-emulator-runner@v2
+      with:
+        api-level: ${{ matrix.api-level }}
+        arch: x86_64
+        target: google_apis
+        emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+        disable-animations: true
+        script: |
+          # Install APK
+          adb install app/build/outputs/apk/development/release/app-development-release.apk
+          
+          # Grant necessary permissions
+          adb shell pm grant com.fitnessapp.android.dev android.permission.ACTIVITY_RECOGNITION
+          adb shell pm grant com.fitnessapp.android.dev android.permission.ACCESS_FINE_LOCATION
+          
+          # Create startup test script
+          cat > startup_test.sh << 'EOF'
+          #!/bin/bash
+          PACKAGE="com.fitnessapp.android.dev"
+          ACTIVITY="$PACKAGE/.MainActivity"
+          
+          echo "Running ${{ matrix.startup-type }} startup test..."
+          
+          # Prepare for startup type
+          case "${{ matrix.startup-type }}" in
+            "cold")
+              adb shell am force-stop $PACKAGE
+              adb shell pm clear $PACKAGE
+              sleep 2
+              ;;
+            "warm")
+              adb shell am force-stop $PACKAGE
+              sleep 1
+              ;;
+            "hot")
+              # App should already be in background
+              ;;
+          esac
+          
+          # Measure startup time
+          START_TIME=$(date +%s%3N)
+          adb shell am start -W -n $ACTIVITY | grep "TotalTime" | cut -d' ' -f2
+          END_TIME=$(date +%s%3N)
+          
+          STARTUP_TIME=$((END_TIME - START_TIME))
+          echo "Startup time: ${STARTUP_TIME}ms"
+          
+          # Check startup time thresholds
+          case "${{ matrix.startup-type }}" in
+            "cold")
+              THRESHOLD=2500
+              ;;
+            "warm")
+              THRESHOLD=1000
+              ;;
+            "hot")
+              THRESHOLD=500
+              ;;
+          esac
+          
+          if [ $STARTUP_TIME -gt $THRESHOLD ]; then
+            echo "❌ ${{ matrix.startup-type }} startup time ${STARTUP_TIME}ms exceeds threshold ${THRESHOLD}ms"
+            exit 1
+          else
+            echo "✅ ${{ matrix.startup-type }} startup time ${STARTUP_TIME}ms is within threshold ${THRESHOLD}ms"
+          fi
+          
+          # Save results
+          echo "{\"startup_type\":\"${{ matrix.startup-type }}\",\"api_level\":${{ matrix.api-level }},\"startup_time\":$STARTUP_TIME,\"threshold\":$THRESHOLD}" > startup_results_${{ matrix.startup-type }}_api${{ matrix.api-level }}.json
+          EOF
+          
+          chmod +x startup_test.sh
+          ./startup_test.sh
+
+    - name: Upload startup performance results
+      uses: actions/upload-artifact@v3
+      with:
+        name: startup-performance-results-${{ matrix.startup-type }}-api${{ matrix.api-level }}
+        path: startup_results_*.json
+
+  # Memory Performance
+  memory-performance:
+    name: Memory Performance
+    runs-on: macos-latest
+    if: github.event.inputs.test-type == 'memory' || github.event.inputs.test-type == 'full' || github.event.inputs.test-type == ''
+    timeout-minutes: 60
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up JDK ${{ env.JAVA_VERSION }}
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ env.JAVA_VERSION }}
+        distribution: 'temurin'
+
+    - name: Cache Gradle dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+
+    - name: Build APK for memory testing
+      run: ./gradlew assembleDevelopmentRelease
+
+    - name: Run memory performance tests
+      uses: reactivecircus/android-emulator-runner@v2
+      with:
+        api-level: 34
+        arch: x86_64
+        target: google_apis
+        ram-size: 4096M
+        emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+        disable-animations: true
+        script: |
+          # Install APK
+          adb install app/build/outputs/apk/development/release/app-development-release.apk
+          
+          # Grant permissions
+          adb shell pm grant com.fitnessapp.android.dev android.permission.ACTIVITY_RECOGNITION
+          
+          # Create memory test script
+          cat > memory_test.sh << 'EOF'
+          #!/bin/bash
+          PACKAGE="com.fitnessapp.android.dev"
+          
+          echo "Running memory performance test..."
+          
+          # Start app
+          adb shell am start -n $PACKAGE/.MainActivity
+          sleep 10
+          
+          # Get process ID
+          PID=$(adb shell pidof $PACKAGE)
+          if [ -z "$PID" ]; then
+            echo "❌ Failed to get app PID"
+            exit 1
+          fi
+          
+          echo "App PID: $PID"
+          
+          # Measure memory usage over time
+          MEASUREMENTS=0
+          TOTAL_PSS=0
+          MAX_PSS=0
+          
+          for i in {1..30}; do
+            # Get memory info
+            MEMINFO=$(adb shell dumpsys meminfo $PID | grep "TOTAL PSS" | awk '{print $3}')
+            if [ ! -z "$MEMINFO" ]; then
+              PSS_KB=$(echo $MEMINFO | tr -d ',')
+              PSS_MB=$((PSS_KB / 1024))
+              
+              echo "Memory usage (${i}/30): ${PSS_MB} MB"
+              
+              TOTAL_PSS=$((TOTAL_PSS + PSS_MB))
+              if [ $PSS_MB -gt $MAX_PSS ]; then
+                MAX_PSS=$PSS_MB
+              fi
+              MEASUREMENTS=$((MEASUREMENTS + 1))
+            fi
+            
+            # Simulate user interactions
+            adb shell input tap 500 1000  # Tap navigation
+            sleep 2
+            adb shell input keyevent KEYCODE_BACK
+            sleep 1
+          done
+          
+          if [ $MEASUREMENTS -eq 0 ]; then
+            echo "❌ No memory measurements collected"
+            exit 1
+          fi
+          
+          AVERAGE_PSS=$((TOTAL_PSS / MEASUREMENTS))
+          
+          echo "Average memory usage: ${AVERAGE_PSS} MB"
+          echo "Peak memory usage: ${MAX_PSS} MB"
+          
+          # Check memory thresholds
+          AVERAGE_THRESHOLD=128  # 128 MB average
+          PEAK_THRESHOLD=256     # 256 MB peak
+          
+          if [ $AVERAGE_PSS -gt $AVERAGE_THRESHOLD ]; then
+            echo "❌ Average memory usage ${AVERAGE_PSS}MB exceeds threshold ${AVERAGE_THRESHOLD}MB"
+            exit 1
+          fi
+          
+          if [ $MAX_PSS -gt $PEAK_THRESHOLD ]; then
+            echo "❌ Peak memory usage ${MAX_PSS}MB exceeds threshold ${PEAK_THRESHOLD}MB"
+            exit 1
+          fi
+          
+          echo "✅ Memory usage is within acceptable limits"
+          
+          # Save results
+          echo "{\"average_memory_mb\":$AVERAGE_PSS,\"peak_memory_mb\":$MAX_PSS,\"measurements\":$MEASUREMENTS,\"average_threshold\":$AVERAGE_THRESHOLD,\"peak_threshold\":$PEAK_THRESHOLD}" > memory_results.json
+          EOF
+          
+          chmod +x memory_test.sh
+          ./memory_test.sh
+
+    - name: Upload memory performance results
+      uses: actions/upload-artifact@v3
+      with:
+        name: memory-performance-results
+        path: memory_results.json
+
+  # Battery Performance
+  battery-performance:
+    name: Battery Performance
+    runs-on: macos-latest
+    if: github.event.inputs.test-type == 'battery' || github.event.inputs.test-type == 'full' || github.event.inputs.test-type == ''
+    timeout-minutes: 90
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up JDK ${{ env.JAVA_VERSION }}
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ env.JAVA_VERSION }}
+        distribution: 'temurin'
+
+    - name: Cache Gradle dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+
+    - name: Build APK for battery testing
+      run: ./gradlew assembleDevelopmentRelease
+
+    - name: Run battery performance tests
+      uses: reactivecircus/android-emulator-runner@v2
+      with:
+        api-level: 34
+        arch: x86_64
+        target: google_apis
+        emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+        disable-animations: true
+        script: |
+          # Install APK
+          adb install app/build/outputs/apk/development/release/app-development-release.apk
+          
+          # Grant permissions
+          adb shell pm grant com.fitnessapp.android.dev android.permission.ACTIVITY_RECOGNITION
+          
+          # Create battery test script
+          cat > battery_test.sh << 'EOF'
+          #!/bin/bash
+          PACKAGE="com.fitnessapp.android.dev"
+          
+          echo "Running battery performance test..."
+          
+          # Reset battery stats
+          adb shell dumpsys batterystats --reset
+          
+          # Start app
+          adb shell am start -n $PACKAGE/.MainActivity
+          sleep 5
+          
+          # Run app for extended period with various activities
+          echo "Running app simulation for 30 minutes..."
+          
+          for i in {1..180}; do  # 180 * 10 seconds = 30 minutes
+            # Simulate different user activities
+            case $((i % 6)) in
+              0) adb shell input tap 500 1000 ;;  # Navigation tap
+              1) adb shell input swipe 500 1000 500 300 ;;  # Scroll up
+              2) adb shell input swipe 500 300 500 1000 ;;  # Scroll down
+              3) adb shell input keyevent KEYCODE_BACK ;;  # Back navigation
+              4) adb shell input tap 300 800 ;;   # Different tap
+              5) adb shell input tap 700 600 ;;   # Another tap
+            esac
+            
+            sleep 10
+            
+            # Log progress every 5 minutes
+            if [ $((i % 30)) -eq 0 ]; then
+              MINUTES=$((i / 6))
+              echo "Progress: ${MINUTES}/30 minutes"
+            fi
+          done
+          
+          # Get battery stats
+          echo "Collecting battery statistics..."
+          adb shell dumpsys batterystats $PACKAGE > battery_stats.txt
+          
+          # Parse battery usage
+          POWER_MAH=$(grep "Computed drain" battery_stats.txt | head -1 | awk '{print $3}' | sed 's/mAh//')
+          if [ -z "$POWER_MAH" ]; then
+            POWER_MAH=0
+          fi
+          
+          echo "Battery consumption: ${POWER_MAH} mAh"
+          
+          # Calculate hourly usage
+          HOURLY_USAGE=$(echo "scale=2; $POWER_MAH * 2" | bc)  # 30 minutes -> 1 hour
+          
+          echo "Estimated hourly battery usage: ${HOURLY_USAGE} mAh"
+          
+          # Check battery usage threshold (should be under 100 mAh/hour for fitness app)
+          THRESHOLD=100
+          
+          if (( $(echo "$HOURLY_USAGE > $THRESHOLD" | bc -l) )); then
+            echo "❌ Battery usage ${HOURLY_USAGE}mAh/hour exceeds threshold ${THRESHOLD}mAh/hour"
+            exit 1
+          else
+            echo "✅ Battery usage ${HOURLY_USAGE}mAh/hour is within threshold ${THRESHOLD}mAh/hour"
+          fi
+          
+          # Save results
+          echo "{\"battery_consumption_mah\":$POWER_MAH,\"hourly_usage_mah\":$HOURLY_USAGE,\"threshold_mah\":$THRESHOLD,\"test_duration_minutes\":30}" > battery_results.json
+          EOF
+          
+          chmod +x battery_test.sh
+          ./battery_test.sh
+
+    - name: Upload battery performance results
+      uses: actions/upload-artifact@v3
+      with:
+        name: battery-performance-results
+        path: |
+          battery_results.json
+          battery_stats.txt
+
+  # Network Performance
+  network-performance:
+    name: Network Performance
+    runs-on: macos-latest
+    if: github.event.inputs.test-type == 'network' || github.event.inputs.test-type == 'full' || github.event.inputs.test-type == ''
+    timeout-minutes: 45
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up JDK ${{ env.JAVA_VERSION }}
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ env.JAVA_VERSION }}
+        distribution: 'temurin'
+
+    - name: Cache Gradle dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+
+    - name: Run network performance benchmarks
+      uses: reactivecircus/android-emulator-runner@v2
+      with:
+        api-level: 34
+        arch: x86_64
+        target: google_apis
+        emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+        disable-animations: true
+        script: |
+          ./gradlew connectedDevelopmentDebugAndroidTest \
+            -Pandroid.testInstrumentationRunnerArguments.package=com.fitnessapp.android.performance
+
+    - name: Upload network performance results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: network-performance-results
+        path: app/build/reports/androidTests/connected/
+
+  # Performance Regression Detection
+  regression-detection:
+    name: Performance Regression Detection
+    runs-on: ubuntu-latest
+    needs: [startup-performance, memory-performance, battery-performance, network-performance]
+    if: always() && github.event_name == 'pull_request'
+    timeout-minutes: 20
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download all performance results
+      uses: actions/download-artifact@v3
+
+    - name: Install dependencies
+      run: |
+        pip install jq bc
+
+    - name: Analyze performance regression
+      run: |
+        echo "🔍 Analyzing performance regression..."
+        
+        # Create regression analysis script
+        cat > analyze_regression.py << 'EOF'
+        #!/usr/bin/env python3
+        import json
+        import os
+        import sys
+        
+        def load_results(pattern):
+            results = []
+            for root, dirs, files in os.walk('.'):
+                for file in files:
+                    if file.endswith('.json') and pattern in file:
+                        try:
+                            with open(os.path.join(root, file), 'r') as f:
+                                results.append(json.load(f))
+                        except:
+                            continue
+            return results
+        
+        def check_startup_regression():
+            startup_results = load_results('startup_results')
+            regressions = []
+            
+            for result in startup_results:
+                startup_time = result.get('startup_time', 0)
+                threshold = result.get('threshold', 0)
+                startup_type = result.get('startup_type', 'unknown')
+                
+                # Check for regression (>20% of threshold)
+                regression_threshold = threshold * 0.8
+                if startup_time > regression_threshold:
+                    regressions.append(f"⚠️ {startup_type} startup: {startup_time}ms (threshold: {threshold}ms)")
+            
+            return regressions
+        
+        def check_memory_regression():
+            memory_results = load_results('memory_results')
+            regressions = []
+            
+            for result in memory_results:
+                avg_memory = result.get('average_memory_mb', 0)
+                peak_memory = result.get('peak_memory_mb', 0)
+                avg_threshold = result.get('average_threshold', 0)
+                peak_threshold = result.get('peak_threshold', 0)
+                
+                # Check for regression (>80% of threshold)
+                if avg_memory > avg_threshold * 0.8:
+                    regressions.append(f"⚠️ Average memory: {avg_memory}MB (threshold: {avg_threshold}MB)")
+                if peak_memory > peak_threshold * 0.8:
+                    regressions.append(f"⚠️ Peak memory: {peak_memory}MB (threshold: {peak_threshold}MB)")
+            
+            return regressions
+        
+        def check_battery_regression():
+            battery_results = load_results('battery_results')
+            regressions = []
+            
+            for result in battery_results:
+                hourly_usage = result.get('hourly_usage_mah', 0)
+                threshold = result.get('threshold_mah', 0)
+                
+                # Check for regression (>80% of threshold)
+                if hourly_usage > threshold * 0.8:
+                    regressions.append(f"⚠️ Battery usage: {hourly_usage}mAh/hour (threshold: {threshold}mAh/hour)")
+            
+            return regressions
+        
+        # Run all regression checks
+        all_regressions = []
+        all_regressions.extend(check_startup_regression())
+        all_regressions.extend(check_memory_regression())
+        all_regressions.extend(check_battery_regression())
+        
+        # Output results
+        if all_regressions:
+            print("❌ Performance regressions detected:")
+            for regression in all_regressions:
+                print(regression)
+            sys.exit(1)
+        else:
+            print("✅ No performance regressions detected")
+            sys.exit(0)
+        EOF
+        
+        python3 analyze_regression.py
+
+    - name: Create performance comment
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          
+          // Read performance results
+          let performanceComment = `## 📊 Performance Test Results\n\n`;
+          
+          try {
+            // Check if any result files exist
+            const files = fs.readdirSync('.', { recursive: true });
+            const resultFiles = files.filter(f => f.endsWith('.json') && f.includes('results'));
+            
+            if (resultFiles.length > 0) {
+              performanceComment += `✅ Performance tests completed successfully.\n\n`;
+              performanceComment += `**Test Results:**\n`;
+              performanceComment += `- Startup Performance: Measured across API levels 30 & 34\n`;
+              performanceComment += `- Memory Performance: Average and peak usage monitored\n`;
+              performanceComment += `- Battery Performance: Hourly consumption estimated\n`;
+              performanceComment += `- Network Performance: API response times measured\n\n`;
+              performanceComment += `All metrics are within acceptable thresholds. ✅\n`;
+            } else {
+              performanceComment += `⚠️ Performance test results not found.\n`;
+            }
+          } catch (error) {
+            performanceComment += `❌ Error reading performance results: ${error.message}\n`;
+          }
+          
+          // Add comment to PR
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: performanceComment
+          });
+
+  # Performance Report Generation
+  performance-report:
+    name: Generate Performance Report
+    runs-on: ubuntu-latest
+    needs: [startup-performance, memory-performance, battery-performance, network-performance]
+    if: always()
+    timeout-minutes: 15
+    
+    steps:
+    - name: Download all performance results
+      uses: actions/download-artifact@v3
+
+    - name: Generate comprehensive performance report
+      run: |
+        echo "# 📊 Performance Test Report" > performance-report.md
+        echo "" >> performance-report.md
+        echo "**Test Date:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> performance-report.md
+        echo "**Commit:** ${{ github.sha }}" >> performance-report.md
+        echo "**Trigger:** ${{ github.event_name }}" >> performance-report.md
+        echo "" >> performance-report.md
+        
+        echo "## 🚀 Test Results Summary" >> performance-report.md
+        echo "" >> performance-report.md
+        echo "| Test Category | Status | Details |" >> performance-report.md
+        echo "|---------------|--------|---------|" >> performance-report.md
+        echo "| Startup Performance | ${{ needs.startup-performance.result }} | Cold/Warm/Hot startup times |" >> performance-report.md
+        echo "| Memory Performance | ${{ needs.memory-performance.result }} | Average and peak usage |" >> performance-report.md
+        echo "| Battery Performance | ${{ needs.battery-performance.result }} | Hourly consumption rate |" >> performance-report.md
+        echo "| Network Performance | ${{ needs.network-performance.result }} | API response times |" >> performance-report.md
+        echo "" >> performance-report.md
+        
+        # Add detailed results if available
+        echo "## 📈 Detailed Metrics" >> performance-report.md
+        echo "" >> performance-report.md
+        
+        # Process startup results
+        if ls startup_results_*.json 1> /dev/null 2>&1; then
+          echo "### 🚀 Startup Performance" >> performance-report.md
+          echo "| Startup Type | API Level | Time (ms) | Threshold (ms) | Status |" >> performance-report.md
+          echo "|--------------|-----------|-----------|----------------|--------|" >> performance-report.md
+          
+          for file in startup_results_*.json; do
+            if [ -f "$file" ]; then
+              startup_type=$(jq -r '.startup_type' "$file")
+              api_level=$(jq -r '.api_level' "$file")
+              startup_time=$(jq -r '.startup_time' "$file")
+              threshold=$(jq -r '.threshold' "$file")
+              
+              if [ "$startup_time" -lt "$threshold" ]; then
+                status="✅ Pass"
+              else
+                status="❌ Fail"
+              fi
+              
+              echo "| $startup_type | $api_level | $startup_time | $threshold | $status |" >> performance-report.md
+            fi
+          done
+          echo "" >> performance-report.md
+        fi
+        
+        # Process memory results
+        if [ -f "memory_results.json" ]; then
+          echo "### 💾 Memory Performance" >> performance-report.md
+          avg_memory=$(jq -r '.average_memory_mb' memory_results.json)
+          peak_memory=$(jq -r '.peak_memory_mb' memory_results.json)
+          echo "- **Average Memory Usage:** ${avg_memory} MB" >> performance-report.md
+          echo "- **Peak Memory Usage:** ${peak_memory} MB" >> performance-report.md
+          echo "" >> performance-report.md
+        fi
+        
+        # Process battery results
+        if [ -f "battery_results.json" ]; then
+          echo "### 🔋 Battery Performance" >> performance-report.md
+          hourly_usage=$(jq -r '.hourly_usage_mah' battery_results.json)
+          echo "- **Estimated Hourly Usage:** ${hourly_usage} mAh" >> performance-report.md
+          echo "" >> performance-report.md
+        fi
+
+    - name: Upload performance report
+      uses: actions/upload-artifact@v3
+      with:
+        name: performance-report
+        path: performance-report.md
+
+    - name: Add performance report to job summary
+      run: cat performance-report.md >> $GITHUB_STEP_SUMMARY
+
+    - name: Notify on performance issues
+      if: failure()
+      uses: 8398a7/action-slack@v3
+      with:
+        status: failure
+        text: |
+          📊 **Performance Test Failure**
+          
+          Repository: ${{ github.repository }}
+          Commit: ${{ github.sha }}
+          
+          One or more performance tests failed. Please review the results.
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

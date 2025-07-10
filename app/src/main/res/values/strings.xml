@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">FitnessApp</string>
+    
+    <!-- Navigation -->
+    <string name="nav_dashboard">Dashboard</string>
+    <string name="nav_workout">Workout</string>
+    <string name="nav_nutrition">Nutrition</string>
+    <string name="nav_health">Health</string>
+    <string name="nav_profile">Profile</string>
+    
+    <!-- Common -->
+    <string name="loading">Loading...</string>
+    <string name="error">Error</string>
+    <string name="retry">Retry</string>
+    <string name="save">Save</string>
+    <string name="cancel">Cancel</string>
+    <string name="delete">Delete</string>
+    <string name="edit">Edit</string>
+    <string name="add">Add</string>
+    
+    <!-- Permissions -->
+    <string name="permission_required">Permission Required</string>
+    <string name="permission_health_rationale">Health permissions are needed to sync your fitness data</string>
+    <string name="permission_camera_rationale">Camera permission is needed to scan food barcodes</string>
+    <string name="permission_location_rationale">Location permission is needed for outdoor workout tracking</string>
+    <string name="permission_denied">Permission denied. Please enable in settings.</string>
+    
+    <!-- Notifications -->
+    <string name="channel_workout_reminders">Workout Reminders</string>
+    <string name="channel_nutrition_reminders">Nutrition Reminders</string>
+    <string name="channel_health_sync">Health Data Sync</string>
+    <string name="channel_achievements">Achievements</string>
+    <string name="channel_workout_timer">Workout Timer</string>
+    
+    <!-- Notifications Content -->
+    <string name="notification_workout_title">Time for your workout!</string>
+    <string name="notification_workout_text">Don\'t break your streak - let\'s get moving!</string>
+    <string name="notification_nutrition_title">Log your meal</string>
+    <string name="notification_nutrition_text">Remember to track what you\'ve eaten</string>
+    <string name="notification_achievement_title">Achievement Unlocked! 🎉</string>
+    <string name="notification_health_sync_title">Health data synced</string>
+    <string name="notification_health_sync_text">Your health data has been updated</string>
+    
+    <!-- Actions -->
+    <string name="action_start_workout">Start Workout</string>
+    <string name="action_log_meal">Log Meal</string>
+    <string name="action_view_achievements">View Achievements</string>
+    <string name="action_sync_health">Sync Health Data</string>
+    
+    <!-- Dashboard -->
+    <string name="dashboard_title">Dashboard</string>
+    <string name="dashboard_welcome">Welcome back!</string>
+    <string name="dashboard_quick_stats">Quick Stats</string>
+    <string name="dashboard_recent_activity">Recent Activity</string>
+    
+    <!-- Widgets -->
+    <string name="widget_quick_stats_name">Quick Stats</string>
+    <string name="widget_quick_stats_description">View your daily fitness stats at a glance</string>
+    <string name="widget_workout_name">Workout Actions</string>
+    <string name="widget_workout_description">Quick access to start workouts and log meals</string>
+    
+    <!-- Errors -->
+    <string name="error_network">Network error. Please check your connection.</string>
+    <string name="error_sync_failed">Sync failed. Trying again later.</string>
+    <string name="error_permission_critical">Critical permissions missing. App may not work properly.</string>
+    <string name="error_health_connect_unavailable">Health Connect is not available on this device</string>
+    
+    <!-- Content Descriptions -->
+    <string name="cd_fitness_icon">Fitness icon</string>
+    <string name="cd_nutrition_icon">Nutrition icon</string>
+    <string name="cd_health_icon">Health icon</string>
+    <string name="cd_profile_icon">Profile icon</string>
+    <string name="cd_sync_icon">Sync icon</string>
+    <string name="cd_achievement_icon">Achievement icon</string>
+</resources>

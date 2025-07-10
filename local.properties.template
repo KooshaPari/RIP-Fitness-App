@@ -1,0 +1,22 @@
+# Local properties template
+# Copy this file to local.properties and add your development API keys
+# NEVER commit local.properties to version control
+
+# Android SDK location
+sdk.dir=/path/to/android-sdk
+
+# Development API Keys
+# Get these from the respective API providers for development
+dev.usda.api.key=your_usda_api_key_here
+dev.fatsecret.client.id=your_fatsecret_client_id_here
+dev.fatsecret.client.secret=your_fatsecret_client_secret_here
+dev.nutritionix.app.id=your_nutritionix_app_id_here
+dev.nutritionix.api.key=your_nutritionix_api_key_here
+dev.upc.api.key=your_upc_database_api_key_here
+dev.exercise.api.key=your_exercise_db_api_key_here
+
+# Development signing (optional)
+# RELEASE_STORE_FILE=keystore/debug.keystore
+# RELEASE_STORE_PASSWORD=android
+# RELEASE_KEY_ALIAS=androiddebugkey
+# RELEASE_KEY_PASSWORD=android

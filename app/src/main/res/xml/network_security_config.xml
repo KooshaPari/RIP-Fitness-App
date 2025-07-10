@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Default security policy: HTTPS only -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system"/>
+        </trust-anchors>
+    </base-config>
+    
+    <!-- Fitness App APIs with certificate pinning -->
+    <domain-config>
+        <domain includeSubdomains="true">api.fitnessapp.com</domain>
+        <domain includeSubdomains="true">api-staging.fitnessapp.com</domain>
+        <pin-set expiration="2026-12-31">
+            <!-- Production certificate pins -->
+            <pin digest="SHA-256">YLh1dUR9y6Kja30RrAn7JKnbQG/uEtLMkBgFF2Fuihg=</pin>
+            <pin digest="SHA-256">Vjs8r4z+80wjNcr1YKepWQboSIRi63WsWXhIMN+eWys=</pin>
+        </pin-set>
+    </domain-config>
+    
+    <!-- USDA FoodData Central API -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">api.nal.usda.gov</domain>
+        <pin-set expiration="2026-12-31">
+            <pin digest="SHA-256">YLh1dUR9y6Kja30RrAn7JKnbQG/uEtLMkBgFF2Fuihg=</pin>
+            <pin digest="SHA-256">Vjs8r4z+80wjNcr1YKepWQboSIRi63WsWXhIMN+eWys=</pin>
+        </pin-set>
+    </domain-config>
+    
+    <!-- FatSecret Platform API -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">platform.fatsecret.com</domain>
+        <pin-set expiration="2026-12-31">
+            <pin digest="SHA-256">x4QzPSC810K5/cMjb05Qm4k3Bw5zBn4lTdO/nEW/Td4=</pin>
+            <pin digest="SHA-256">WoiWRyIOVNa9ihaBciRSC7XHjliYS9VwUGOIud4PB18=</pin>
+        </pin-set>
+    </domain-config>
+    
+    <!-- Nutritionix API -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">trackapi.nutritionix.com</domain>
+        <pin-set expiration="2026-12-31">
+            <pin digest="SHA-256">JSMzqOOrtyOT1kmau6zKhgT676hGgczD5VMdRMyJZFA=</pin>
+            <pin digest="SHA-256">++MBgDH5WGvL9Bcn5Be30cRcL0f5O+NyoXuWtQdX1aI=</pin>
+        </pin-set>
+    </domain-config>
+    
+    <!-- UPC Database API -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">api.upcitemdb.com</domain>
+        <pin-set expiration="2026-12-31">
+            <pin digest="SHA-256">2PzLygwNlENaAoMkOWXqRnMQ6CbgE1URFzNZdQ2lUMs=</pin>
+            <pin digest="SHA-256">q5/GHNNzKlzl9TXLzfCFGIx4lRWzR8kOHnzZoT4xq3o=</pin>
+        </pin-set>
+    </domain-config>
+    
+    <!-- RapidAPI (Exercise Database) -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">exercisedb.p.rapidapi.com</domain>
+        <domain includeSubdomains="true">rapidapi.com</domain>
+        <pin-set expiration="2026-12-31">
+            <pin digest="SHA-256">jQJTsn/t2YHskVBNZ8J8J7WZeUaGFbFCDfQ72ZF8aYw=</pin>
+            <pin digest="SHA-256">9+ze1cZgR9KO1kZrVDxA4HQ6voHRCSVNz4RdTCx4U8U=</pin>
+        </pin-set>
+    </domain-config>
+    
+    <!-- Firebase services -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">firebase.googleapis.com</domain>
+        <domain includeSubdomains="true">firestore.googleapis.com</domain>
+        <domain includeSubdomains="true">securetoken.googleapis.com</domain>
+        <domain includeSubdomains="true">firebaseapp.com</domain>
+    </domain-config>
+    
+    <!-- Google APIs -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">googleapis.com</domain>
+        <domain includeSubdomains="true">gstatic.com</domain>
+    </domain-config>
+    
+    <!-- Development only: Allow dev servers -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">api-dev.fitnessapp.com</domain>
+        <!-- No pinning for dev to allow self-signed certificates -->
+    </domain-config>
+    
+    <!-- Debug overrides for development builds only -->
+    <debug-overrides>
+        <trust-anchors>
+            <certificates src="system"/>
+            <certificates src="user"/>
+        </trust-anchors>
+    </debug-overrides>
+</network-security-config>

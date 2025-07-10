@@ -1,0 +1,214 @@
+// Build optimization and analysis script
+// Apply this to app/build.gradle.kts to enable additional optimizations
+
+// Build scan plugin for performance analysis
+apply plugin: 'com.gradle.build-scan'
+
+buildScan {
+    termsOfServiceUrl = 'https://gradle.com/terms-of-service'
+    termsOfServiceAgree = 'yes'
+    publishAlways()
+    
+    buildFinished {
+        def optimizationReport = file("${project.buildDir}/reports/build-optimization.txt")
+        optimizationReport.parentFile.mkdirs()
+        optimizationReport.text = """
+Build Optimization Report
+========================
+Build Time: ${new Date()}
+Gradle Version: ${gradle.gradleVersion}
+Android Gradle Plugin: ${com.android.builder.model.Version.ANDROID_GRADLE_PLUGIN_VERSION}
+
+Performance Metrics:
+- Parallel Execution: ${project.gradle.startParameter.parallelProjectExecutionEnabled}
+- Build Cache: ${project.gradle.startParameter.buildCacheEnabled}
+- Configuration Cache: ${gradle.startParameter.configurationCache}
+- Workers: ${project.gradle.startParameter.maxWorkerCount}
+
+Optimization Status:
+- R8 Enabled: ${android.buildTypes.release.minifyEnabled}
+- Resource Shrinking: ${android.buildTypes.release.shrinkResources}
+- ProGuard Rules: ${android.buildTypes.release.proguardFiles.size()} files
+"""
+    }
+}
+
+// Performance monitoring task
+task buildPerformanceReport {
+    group = 'optimization'
+    description = 'Generate build performance report'
+    
+    doLast {
+        def reportFile = file("${project.buildDir}/reports/performance-analysis.json")
+        reportFile.parentFile.mkdirs()
+        
+        def metrics = [
+            timestamp: System.currentTimeMillis(),
+            gradle_version: gradle.gradleVersion,
+            jvm_args: gradle.startParameter.jvmArgs,
+            parallel_enabled: gradle.startParameter.parallelProjectExecutionEnabled,
+            cache_enabled: gradle.startParameter.buildCacheEnabled,
+            daemon_enabled: gradle.startParameter.daemon,
+            configuration_cache: gradle.startParameter.configurationCache,
+            max_workers: gradle.startParameter.maxWorkerCount,
+            build_variants: android.applicationVariants.size(),
+            dependencies_count: configurations.implementation.allDependencies.size()
+        ]
+        
+        reportFile.text = groovy.json.JsonBuilder(metrics).toPrettyString()
+        println "Performance report generated: ${reportFile.absolutePath}"
+    }
+}
+
+// APK size analysis task
+task analyzeApkSize {
+    group = 'optimization'
+    description = 'Analyze APK size and suggest optimizations'
+    
+    dependsOn 'assembleRelease'
+    
+    doLast {
+        def apkFile = file("${project.buildDir}/outputs/apk/production/release/app-production-release.apk")
+        if (apkFile.exists()) {
+            def sizeInMB = apkFile.length() / (1024 * 1024)
+            def reportFile = file("${project.buildDir}/reports/apk-size-analysis.txt")
+            reportFile.parentFile.mkdirs()
+            
+            reportFile.text = """
+APK Size Analysis Report
+========================
+APK File: ${apkFile.name}
+Size: ${String.format("%.2f", sizeInMB)} MB
+Path: ${apkFile.absolutePath}
+
+Size Recommendations:
+${sizeInMB > 50 ? '❌ APK size exceeds 50MB - Consider app bundle or dynamic features' : '✅ APK size is reasonable'}
+${sizeInMB > 100 ? '❌ APK size exceeds 100MB - Review dependencies and assets' : ''}
+${sizeInMB > 150 ? '❌ APK size exceeds 150MB - Critical optimization needed' : ''}
+
+Optimization Suggestions:
+- Enable resource shrinking: ${android.buildTypes.release.shrinkResources ? '✅' : '❌'}
+- Enable minification: ${android.buildTypes.release.minifyEnabled ? '✅' : '❌'}
+- Use WebP images instead of PNG/JPG
+- Remove unused dependencies
+- Use vector drawables instead of raster images
+- Consider app bundle distribution
+"""
+            
+            println "APK Size: ${String.format("%.2f", sizeInMB)} MB"
+            println "Analysis report: ${reportFile.absolutePath}"
+        }
+    }
+}
+
+// Build cache optimization
+task optimizeBuildCache {
+    group = 'optimization'
+    description = 'Optimize build cache configuration'
+    
+    doLast {
+        def cacheDir = gradle.gradleUserHomeDir.toPath().resolve('caches')
+        def cacheSize = 0
+        
+        if (cacheDir.toFile().exists()) {
+            cacheDir.toFile().eachFileRecurse { file ->
+                if (file.isFile()) {
+                    cacheSize += file.length()
+                }
+            }
+        }
+        
+        def cacheSizeInMB = cacheSize / (1024 * 1024)
+        println "Build cache size: ${String.format("%.2f", cacheSizeInMB)} MB"
+        
+        if (cacheSizeInMB > 5000) {
+            println "⚠️  Build cache is large (${String.format("%.2f", cacheSizeInMB)} MB)"
+            println "Consider running: ./gradlew cleanBuildCache"
+        }
+    }
+}
+
+// Dependency analysis
+task analyzeDependencies {
+    group = 'optimization'
+    description = 'Analyze dependencies for optimization opportunities'
+    
+    doLast {
+        def reportFile = file("${project.buildDir}/reports/dependency-analysis.txt")
+        reportFile.parentFile.mkdirs()
+        
+        def implementation = configurations.implementation.allDependencies
+        def androidTest = configurations.androidTestImplementation.allDependencies
+        
+        reportFile.text = """
+Dependency Analysis Report
+=========================
+Implementation Dependencies: ${implementation.size()}
+Android Test Dependencies: ${androidTest.size()}
+
+Large Dependencies (potential optimization targets):
+${implementation.findAll { it.name.contains('compose') }.collect { "- ${it.group}:${it.name}:${it.version}" }.join('\n')}
+
+Optimization Recommendations:
+- Review if all Compose dependencies are needed
+- Consider using implementation instead of api where possible
+- Check for duplicate functionality in dependencies
+- Use BOM (Bill of Materials) for version alignment
+"""
+    }
+}
+
+// Security analysis task
+task securityAnalysis {
+    group = 'verification'
+    description = 'Analyze build security configuration'
+    
+    doLast {
+        def reportFile = file("${project.buildDir}/reports/security-analysis.txt")
+        reportFile.parentFile.mkdirs()
+        
+        def releaseConfig = android.buildTypes.release
+        def signingConfig = releaseConfig.signingConfig
+        
+        reportFile.text = """
+Security Analysis Report
+========================
+Release Build Configuration:
+- Minification: ${releaseConfig.minifyEnabled ? '✅' : '❌'}
+- Resource Shrinking: ${releaseConfig.shrinkResources ? '✅' : '❌'}
+- Debuggable: ${releaseConfig.debuggable ? '❌ Security Risk' : '✅'}
+- JNI Debuggable: ${releaseConfig.jniDebuggable ? '❌ Security Risk' : '✅'}
+
+Signing Configuration:
+- Has Release Signing: ${signingConfig != null && signingConfig.name != 'debug' ? '✅' : '❌ Critical'}
+- V1 Signing: ${signingConfig?.v1SigningEnabled ? '✅' : '❌'}
+- V2 Signing: ${signingConfig?.v2SigningEnabled ? '✅' : '❌'}
+- V3 Signing: ${signingConfig?.v3SigningEnabled ? '✅' : '❌'}
+- V4 Signing: ${signingConfig?.v4SigningEnabled ? '✅' : '❌'}
+
+Network Security:
+- Network Security Config: ${file('src/main/res/xml/network_security_config.xml').exists() ? '✅' : '❌'}
+
+ProGuard Rules:
+- ProGuard Files: ${releaseConfig.proguardFiles.size()} configured
+- Security Rules: ${file('proguard-rules.pro').text.contains('security') ? '✅' : '❌'}
+
+Critical Issues:
+${releaseConfig.debuggable ? '❌ Release build is debuggable - security risk' : ''}
+${signingConfig?.name == 'debug' ? '❌ Using debug signing for release - critical security issue' : ''}
+"""
+    }
+}
+
+// Add tasks to build lifecycle
+tasks.whenTaskAdded { task ->
+    if (task.name == 'assembleRelease') {
+        task.finalizedBy analyzeApkSize
+        task.finalizedBy securityAnalysis
+    }
+    
+    if (task.name == 'build') {
+        task.finalizedBy buildPerformanceReport
+        task.finalizedBy analyzeDependencies
+    }
+}

@@ -1,0 +1,74 @@
+# Android Studio and Gradle
+*.iml
+.gradle
+/local.properties
+/.idea/
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# Keystore files (for security)
+*.jks
+*.keystore
+keystore.properties
+
+# API Keys and Secrets
+secrets.properties
+google-services.json
+.env
+
+# Generated files
+bin/
+gen/
+out/
+
+# Android profiler
+*.hprof
+
+# KMobile testing
+test-results/
+kmobile-reports/
+screenshots/
+videos/
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# NDK
+obj/
+
+# IntelliJ IDEA
+*.iws
+/out/
+
+# User-specific configurations
+.idea/workspace.xml
+.idea/tasks.xml
+.idea/gradle.xml
+.idea/assetWizardSettings.xml
+.idea/dictionaries
+.idea/libraries
+.idea/jarRepositories.xml
+.idea/compiler.xml
+.idea/misc.xml
+.idea/modules.xml
+.idea/navEditor.xml
+
+# macOS
+.DS_Store
+
+# Signing files
+upload-keystore.jks
+app-signing-key.jks
+
+# ProGuard mapping files
+mapping.txt

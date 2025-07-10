@@ -1,0 +1,524 @@
+name: Security Scanning
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run security scans daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+env:
+  GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.workers.max=2"
+  JAVA_VERSION: 17
+
+jobs:
+  # Static Application Security Testing (SAST)
+  sast-analysis:
+    name: SAST Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up JDK ${{ env.JAVA_VERSION }}
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ env.JAVA_VERSION }}
+        distribution: 'temurin'
+
+    - name: Cache Gradle dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+
+    # CodeQL Analysis
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: java
+        queries: security-extended,security-and-quality
+
+    - name: Build for CodeQL
+      run: ./gradlew assembleDebug --no-daemon
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3
+      with:
+        category: "/language:java"
+
+    # Detekt Static Analysis
+    - name: Run Detekt
+      run: ./gradlew detekt
+
+    - name: Upload Detekt SARIF
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: build/reports/detekt/detekt.sarif
+
+    # SpotBugs Analysis
+    - name: Run SpotBugs
+      run: ./gradlew spotbugsMain spotbugsTest
+
+    - name: Upload SpotBugs results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: spotbugs-results
+        path: |
+          build/reports/spotbugs/
+          */build/reports/spotbugs/
+
+    # Android Lint Security Analysis
+    - name: Run Android Lint
+      run: ./gradlew lintDevelopmentDebug
+
+    - name: Upload Lint results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: lint-results
+        path: |
+          app/build/reports/lint-results-developmentDebug.html
+          app/build/reports/lint-results-developmentDebug.xml
+
+  # Dependency Vulnerability Scanning
+  dependency-check:
+    name: Dependency Vulnerability Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up JDK ${{ env.JAVA_VERSION }}
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ env.JAVA_VERSION }}
+        distribution: 'temurin'
+
+    - name: Cache Gradle dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+
+    - name: Cache OWASP Dependency Check DB
+      uses: actions/cache@v3
+      with:
+        path: ~/.gradle/dependency-check-data
+        key: ${{ runner.os }}-dependency-check-${{ hashFiles('**/gradle.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-dependency-check-
+
+    - name: Run OWASP Dependency Check
+      run: ./gradlew dependencyCheckAnalyze
+
+    - name: Upload dependency check results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: dependency-check-results
+        path: build/reports/dependency-check/
+
+    # Snyk vulnerability scanning
+    - name: Run Snyk to check for vulnerabilities
+      uses: snyk/actions/gradle@master
+      continue-on-error: true
+      env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      with:
+        args: --severity-threshold=high --file=build.gradle.kts
+
+    - name: Upload Snyk results
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: snyk.sarif
+
+  # Secrets Scanning
+  secrets-scan:
+    name: Secrets Scanning
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Run TruffleHog OSS
+      uses: trufflesecurity/trufflehog@main
+      with:
+        path: ./
+        base: main
+        head: HEAD
+        extra_args: --debug --only-verified
+
+    - name: Check for hardcoded secrets
+      run: |
+        echo "🔍 Scanning for potential secrets..."
+        
+        # Check for API keys
+        if grep -r -E "(api.?key|api.?secret|access.?token)" --include="*.kt" --include="*.java" --exclude-dir=.git . | grep -v "BuildConfig\|getString\|context\."; then
+          echo "❌ Potential API keys found in source code!"
+          exit 1
+        fi
+        
+        # Check for passwords
+        if grep -r -E "(password|passwd|pwd).*=.*['\"][^'\"]{8,}" --include="*.kt" --include="*.java" --exclude-dir=.git .; then
+          echo "❌ Potential hardcoded passwords found!"
+          exit 1
+        fi
+        
+        # Check for private keys
+        if grep -r -E "(private.?key|rsa.?key)" --include="*.kt" --include="*.java" --exclude-dir=.git .; then
+          echo "❌ Potential private keys found!"
+          exit 1
+        fi
+        
+        # Check for Firebase/AWS credentials
+        if grep -r -E "(firebase|aws).*(key|secret|credential)" --include="*.kt" --include="*.java" --exclude-dir=.git .; then
+          echo "❌ Potential cloud service credentials found!"
+          exit 1
+        fi
+        
+        echo "✅ No hardcoded secrets detected"
+
+    - name: Check configuration files
+      run: |
+        echo "🔍 Checking configuration files..."
+        
+        # Check for secrets in properties files
+        if find . -name "*.properties" -not -path "./.git/*" -exec grep -l -E "(key|secret|password|token)" {} \;; then
+          echo "⚠️ Found potential secrets in properties files - verify these are not committed"
+        fi
+        
+        # Check keystore files are not committed
+        if find . -name "*.jks" -o -name "*.keystore" -not -path "./.git/*"; then
+          echo "❌ Keystore files found in repository!"
+          exit 1
+        fi
+        
+        echo "✅ Configuration files check passed"
+
+  # Mobile-Specific Security Analysis
+  mobile-security:
+    name: Mobile Security Analysis
+    runs-on: ubuntu-latest
+    needs: [sast-analysis]
+    timeout-minutes: 60
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up JDK ${{ env.JAVA_VERSION }}
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ env.JAVA_VERSION }}
+        distribution: 'temurin'
+
+    - name: Cache Gradle dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+
+    - name: Build APK for security analysis
+      run: ./gradlew assembleDevelopmentDebug
+
+    # QARK (Quick Android Review Kit)
+    - name: Install QARK
+      run: |
+        pip install qark
+
+    - name: Run QARK security analysis
+      run: |
+        qark --apk app/build/outputs/apk/development/debug/app-development-debug.apk \
+             --report-type json \
+             --output-dir qark-results
+      continue-on-error: true
+
+    - name: Upload QARK results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: qark-results
+        path: qark-results/
+
+    # MobSF Analysis (if available)
+    - name: Run MobSF analysis
+      if: secrets.MOBSF_URL && secrets.MOBSF_API_KEY
+      uses: fundacaocerti/mobsf-action@v1.7.1
+      with:
+        input-file-path: app/build/outputs/apk/development/debug/app-development-debug.apk
+        mobsf-url: ${{ secrets.MOBSF_URL }}
+        mobsf-api-key: ${{ secrets.MOBSF_API_KEY }}
+
+    - name: Upload MobSF results
+      if: secrets.MOBSF_URL && secrets.MOBSF_API_KEY
+      uses: actions/upload-artifact@v3
+      with:
+        name: mobsf-results
+        path: mobsf-report.json
+
+    # Android permissions analysis
+    - name: Analyze Android permissions
+      run: |
+        echo "🔍 Analyzing Android permissions..."
+        
+        APK_PATH="app/build/outputs/apk/development/debug/app-development-debug.apk"
+        
+        # Extract permissions from APK
+        aapt dump permissions "$APK_PATH" > permissions.txt
+        
+        # Check for dangerous permissions
+        if grep -E "(CAMERA|LOCATION|MICROPHONE|READ_CONTACTS|READ_SMS|CALL_PHONE)" permissions.txt; then
+          echo "⚠️ Dangerous permissions detected - ensure proper usage justification"
+        fi
+        
+        # Check for unnecessary permissions
+        if grep -E "(WRITE_EXTERNAL_STORAGE|READ_PHONE_STATE|ACCESS_WIFI_STATE)" permissions.txt; then
+          echo "⚠️ Review if these permissions are necessary"
+        fi
+        
+        echo "✅ Permissions analysis complete"
+
+    - name: Upload permissions analysis
+      uses: actions/upload-artifact@v3
+      with:
+        name: permissions-analysis
+        path: permissions.txt
+
+  # Network Security Analysis
+  network-security:
+    name: Network Security Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Check network security config
+      run: |
+        echo "🔍 Analyzing network security configuration..."
+        
+        # Check if network security config exists
+        NSC_PATH="app/src/main/res/xml/network_security_config.xml"
+        if [ ! -f "$NSC_PATH" ]; then
+          echo "⚠️ Network security config not found"
+          exit 0
+        fi
+        
+        # Check for certificate pinning
+        if grep -q "pin-set" "$NSC_PATH"; then
+          echo "✅ Certificate pinning configured"
+        else
+          echo "⚠️ Certificate pinning not configured"
+        fi
+        
+        # Check for cleartext traffic
+        if grep -q "cleartextTrafficPermitted.*true" "$NSC_PATH"; then
+          echo "❌ Cleartext traffic is permitted!"
+          exit 1
+        fi
+        
+        echo "✅ Network security configuration validated"
+
+    - name: Check TLS configuration
+      run: |
+        echo "🔍 Checking TLS configuration in code..."
+        
+        # Check for hardcoded HTTP URLs
+        if grep -r "http://" --include="*.kt" --include="*.java" app/src/ | grep -v "localhost\|127.0.0.1"; then
+          echo "❌ Hardcoded HTTP URLs found!"
+          exit 1
+        fi
+        
+        # Check for TLS version configuration
+        if grep -r "TLS" --include="*.kt" --include="*.java" app/src/; then
+          echo "✅ TLS configuration found in code"
+        fi
+        
+        echo "✅ TLS configuration check passed"
+
+  # Security Test Execution
+  security-tests:
+    name: Security Tests
+    runs-on: macos-latest
+    timeout-minutes: 45
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up JDK ${{ env.JAVA_VERSION }}
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ env.JAVA_VERSION }}
+        distribution: 'temurin'
+
+    - name: Cache Gradle dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+
+    - name: Run security tests
+      uses: reactivecircus/android-emulator-runner@v2
+      with:
+        api-level: 34
+        arch: x86_64
+        target: google_apis
+        emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+        disable-animations: true
+        script: |
+          ./gradlew connectedDevelopmentDebugAndroidTest \
+            -Pandroid.testInstrumentationRunnerArguments.package=com.fitnessapp.android.security
+
+    - name: Upload security test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: security-test-results
+        path: app/build/reports/androidTests/connected/
+
+  # Security Report Generation
+  security-report:
+    name: Generate Security Report
+    runs-on: ubuntu-latest
+    needs: [sast-analysis, dependency-check, secrets-scan, mobile-security, network-security, security-tests]
+    if: always()
+    timeout-minutes: 15
+    
+    steps:
+    - name: Download all security artifacts
+      uses: actions/download-artifact@v3
+
+    - name: Generate security summary
+      run: |
+        echo "# 🔒 Security Scan Summary" > security-summary.md
+        echo "" >> security-summary.md
+        echo "**Scan Date:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> security-summary.md
+        echo "**Commit:** ${{ github.sha }}" >> security-summary.md
+        echo "" >> security-summary.md
+        
+        echo "## 📊 Scan Results" >> security-summary.md
+        echo "" >> security-summary.md
+        echo "| Security Check | Status | Details |" >> security-summary.md
+        echo "|----------------|--------|---------|" >> security-summary.md
+        echo "| SAST Analysis | ${{ needs.sast-analysis.result }} | CodeQL, Detekt, SpotBugs |" >> security-summary.md
+        echo "| Dependency Check | ${{ needs.dependency-check.result }} | OWASP, Snyk |" >> security-summary.md
+        echo "| Secrets Scan | ${{ needs.secrets-scan.result }} | TruffleHog, Pattern matching |" >> security-summary.md
+        echo "| Mobile Security | ${{ needs.mobile-security.result }} | QARK, MobSF, Permissions |" >> security-summary.md
+        echo "| Network Security | ${{ needs.network-security.result }} | TLS, Certificate pinning |" >> security-summary.md
+        echo "| Security Tests | ${{ needs.security-tests.result }} | Automated security tests |" >> security-summary.md
+        echo "" >> security-summary.md
+        
+        # Check for any failures
+        if [[ "${{ needs.sast-analysis.result }}" == "failure" || \
+              "${{ needs.dependency-check.result }}" == "failure" || \
+              "${{ needs.secrets-scan.result }}" == "failure" || \
+              "${{ needs.mobile-security.result }}" == "failure" || \
+              "${{ needs.network-security.result }}" == "failure" || \
+              "${{ needs.security-tests.result }}" == "failure" ]]; then
+          echo "## ⚠️ Security Issues Detected" >> security-summary.md
+          echo "" >> security-summary.md
+          echo "Please review the failed security checks and address any issues before proceeding." >> security-summary.md
+        else
+          echo "## ✅ All Security Checks Passed" >> security-summary.md
+          echo "" >> security-summary.md
+          echo "No critical security issues detected in this scan." >> security-summary.md
+        fi
+
+    - name: Upload security summary
+      uses: actions/upload-artifact@v3
+      with:
+        name: security-summary
+        path: security-summary.md
+
+    - name: Add security summary to job summary
+      run: cat security-summary.md >> $GITHUB_STEP_SUMMARY
+
+    - name: Notify on security issues
+      if: failure()
+      uses: 8398a7/action-slack@v3
+      with:
+        status: failure
+        text: |
+          🚨 **Security Issues Detected!**
+          
+          Repository: ${{ github.repository }}
+          Commit: ${{ github.sha }}
+          
+          Please review the security scan results and address any issues immediately.
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+    - name: Create security issue on failure
+      if: failure() && github.event_name != 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: '🔒 Security Scan Failure - ' + context.sha.substring(0, 7),
+            body: `
+            ## Security Scan Failure
+            
+            **Commit:** ${context.sha}
+            **Workflow:** ${context.workflow}
+            **Run:** ${context.runNumber}
+            
+            One or more security scans failed. Please review the workflow results and address any security issues.
+            
+            **View Results:** ${context.payload.repository.html_url}/actions/runs/${context.runId}
+            `,
+            labels: ['security', 'bug', 'high-priority']
+          });

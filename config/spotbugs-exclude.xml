@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+    <!-- Exclude generated code -->
+    <Match>
+        <Class name="~.*\$.*"/>
+    </Match>
+    
+    <Match>
+        <Class name="~.*\.R\$.*"/>
+    </Match>
+    
+    <Match>
+        <Class name="~.*\.BuildConfig"/>
+    </Match>
+    
+    <Match>
+        <Class name="~.*\.Manifest\$.*"/>
+    </Match>
+    
+    <!-- Exclude Hilt generated code -->
+    <Match>
+        <Class name="~.*_Factory"/>
+    </Match>
+    
+    <Match>
+        <Class name="~.*_MembersInjector"/>
+    </Match>
+    
+    <Match>
+        <Class name="~.*Module_.*Factory"/>
+    </Match>
+    
+    <Match>
+        <Class name="~.*_ComponentImpl"/>
+    </Match>
+    
+    <!-- Exclude Room generated code -->
+    <Match>
+        <Class name="~.*_Impl"/>
+    </Match>
+    
+    <!-- Exclude test classes -->
+    <Match>
+        <Class name="~.*Test.*"/>
+    </Match>
+    
+    <Match>
+        <Source name="~.*test.*"/>
+    </Match>
+    
+    <Match>
+        <Source name="~.*androidTest.*"/>
+    </Match>
+    
+    <!-- Exclude specific security issues that are false positives -->
+    
+    <!-- Android specific exclusions -->
+    <Match>
+        <Bug pattern="DMI_HARDCODED_ABSOLUTE_FILENAME"/>
+        <Class name="~.*\.MainActivity"/>
+    </Match>
+    
+    <!-- Exclude serialization warnings for data classes -->
+    <Match>
+        <Bug pattern="SE_NO_SERIALVERSIONID"/>
+    </Match>
+    
+    <!-- Exclude missing switch default for enum when using when expression -->
+    <Match>
+        <Bug pattern="SF_SWITCH_NO_DEFAULT"/>
+    </Match>
+    
+    <!-- Exclude HTTP parameter pollution (Android specific) -->
+    <Match>
+        <Bug pattern="HRS_REQUEST_PARAMETER_TO_HTTP_HEADER"/>
+    </Match>
+    
+    <!-- Exclude specific false positives for Kotlin -->
+    <Match>
+        <Bug pattern="NP_PARAMETER_MUST_BE_NONNULL_BUT_MARKED_AS_NULLABLE"/>
+    </Match>
+    
+    <!-- Exclude nullability issues in generated code -->
+    <Match>
+        <Bug pattern="NP_NONNULL_PARAM_VIOLATION"/>
+        <Class name="~.*_Factory"/>
+    </Match>
+    
+    <!-- Exclude performance issues in debug builds -->
+    <Match>
+        <Bug pattern="DM_STRING_CTOR"/>
+        <Source name="~.*debug.*"/>
+    </Match>
+    
+    <!-- Exclude specific patterns for Android components -->
+    <Match>
+        <Bug pattern="UWF_UNWRITTEN_FIELD"/>
+        <Field name="~.*ViewBinding"/>
+    </Match>
+    
+    <!-- Exclude file path issues in Android -->
+    <Match>
+        <Bug pattern="PATH_TRAVERSAL_IN"/>
+        <Method name="~.*getExternalFilesDir.*"/>
+    </Match>
+</FindBugsFilter>

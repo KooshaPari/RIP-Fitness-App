@@ -1,0 +1,225 @@
+# KMobile Configuration for Fitness App Testing
+apiVersion: v1
+kind: KMobileConfig
+metadata:
+  name: fitness-app-testing
+  version: "1.0.0"
+
+# Device Configuration
+devices:
+  physical:
+    - name: "pixel-7-pro"
+      model: "Pixel 7 Pro"
+      osVersion: "14"
+      capabilities: ["health-connect", "biometric", "camera", "nfc"]
+      performance: "high"
+    - name: "galaxy-s23-ultra"
+      model: "Galaxy S23 Ultra"
+      osVersion: "14"
+      capabilities: ["samsung-health", "spen", "camera", "wireless-charging"]
+      performance: "high"
+    - name: "iphone-14-pro"
+      model: "iPhone 14 Pro"
+      osVersion: "17"
+      capabilities: ["health-kit", "face-id", "camera", "magsafe"]
+      performance: "high"
+
+  emulators:
+    - name: "api-30-emulator"
+      api: 30
+      abi: "x86_64"
+      target: "google_apis"
+      avdName: "Pixel_6_API_30"
+    - name: "api-34-emulator"
+      api: 34
+      abi: "x86_64"
+      target: "google_apis"
+      avdName: "Pixel_8_API_34"
+
+# Test Suites Configuration
+testSuites:
+  unit:
+    enabled: true
+    parallel: true
+    timeout: 300
+    retries: 2
+    
+  integration:
+    enabled: true
+    parallel: false
+    timeout: 600
+    retries: 1
+    devices: ["api-34-emulator"]
+    
+  ui:
+    enabled: true
+    parallel: true
+    timeout: 900
+    retries: 2
+    devices: ["pixel-7-pro", "api-34-emulator"]
+    screenshots: true
+    
+  e2e:
+    enabled: true
+    parallel: false
+    timeout: 1800
+    retries: 1
+    devices: ["pixel-7-pro", "galaxy-s23-ultra"]
+    recordVideo: true
+    
+  performance:
+    enabled: true
+    parallel: false
+    timeout: 1200
+    retries: 0
+    devices: ["pixel-7-pro"]
+    metrics: ["cpu", "memory", "battery", "network", "storage"]
+    
+  security:
+    enabled: true
+    parallel: true
+    timeout: 600
+    retries: 1
+    staticAnalysis: true
+    dynamicAnalysis: true
+    
+  accessibility:
+    enabled: true
+    parallel: true
+    timeout: 600
+    retries: 1
+    devices: ["pixel-7-pro"]
+    talkbackEnabled: true
+
+# Environment Configuration
+environment:
+  development:
+    baseUrl: "https://api-dev.fitnessapp.com"
+    mockData: true
+    logLevel: "DEBUG"
+    
+  staging:
+    baseUrl: "https://api-staging.fitnessapp.com"
+    mockData: false
+    logLevel: "INFO"
+    
+  production:
+    baseUrl: "https://api.fitnessapp.com"
+    mockData: false
+    logLevel: "WARN"
+
+# Health Data Testing
+healthData:
+  mockProviders:
+    - name: "HealthConnect"
+      enabled: true
+      dataTypes: ["steps", "heart_rate", "weight", "calories", "sleep"]
+    - name: "GoogleFit"
+      enabled: true
+      dataTypes: ["workouts", "nutrition", "body_measurements"]
+    - name: "SamsungHealth"
+      enabled: true
+      dataTypes: ["blood_pressure", "glucose", "stress"]
+
+# Performance Benchmarks
+performance:
+  appStartup:
+    coldStart: 2500  # ms
+    warmStart: 1000  # ms
+    hotStart: 500    # ms
+    
+  database:
+    queryTime: 100   # ms
+    insertTime: 50   # ms
+    syncTime: 5000   # ms
+    
+  network:
+    apiResponseTime: 2000  # ms
+    imageLoadTime: 3000    # ms
+    offlineMode: true
+    
+  memory:
+    maxHeapSize: 256  # MB
+    leakDetection: true
+    
+  battery:
+    backgroundUsage: 5    # %/hour
+    screenOnUsage: 20     # %/hour
+
+# Security Testing
+security:
+  encryption:
+    dataAtRest: true
+    dataInTransit: true
+    keyRotation: true
+    
+  authentication:
+    biometric: true
+    pinCode: true
+    tokenValidation: true
+    
+  permissions:
+    minimumRequired: true
+    runtimePermissions: true
+    sensitiveDataAccess: true
+    
+  networking:
+    certificatePinning: true
+    sslValidation: true
+    apiKeyProtection: true
+
+# Accessibility Testing
+accessibility:
+  guidelines:
+    - "WCAG 2.1 AA"
+    - "Android Accessibility"
+    - "Material Design Accessibility"
+    
+  checks:
+    - contentDescription: true
+    - colorContrast: true
+    - touchTargetSize: true
+    - focusTraversal: true
+    - screenReader: true
+    - textScaling: true
+
+# Reporting Configuration
+reporting:
+  formats: ["html", "junit", "allure"]
+  screenshots: true
+  videos: true
+  logs: true
+  metrics: true
+  
+  destinations:
+    - type: "file"
+      path: "./testing/reports"
+    - type: "s3"
+      bucket: "fitness-app-test-reports"
+    - type: "slack"
+      webhook: "${SLACK_WEBHOOK_URL}"
+
+# CI/CD Integration
+cicd:
+  github:
+    enabled: true
+    workflows: [".github/workflows/testing.yml"]
+    prChecks: true
+    
+  jenkins:
+    enabled: false
+    
+  bitrise:
+    enabled: false
+
+# Notifications
+notifications:
+  slack:
+    channel: "#fitness-app-testing"
+    onFailure: true
+    onSuccess: false
+    
+  email:
+    recipients: ["team@fitnessapp.com"]
+    onFailure: true
+    onSuccess: false

@@ -1,0 +1,447 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+env:
+  GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.workers.max=2"
+  JAVA_VERSION: 17
+
+jobs:
+  # Code Quality and Security Checks
+  code-quality:
+    name: Code Quality & Security
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up JDK ${{ env.JAVA_VERSION }}
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ env.JAVA_VERSION }}
+        distribution: 'temurin'
+
+    - name: Cache Gradle dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+
+    - name: Run static analysis (Detekt)
+      run: ./gradlew detekt
+
+    - name: Run security analysis (SpotBugs)
+      run: ./gradlew spotbugsMain spotbugsTest
+
+    - name: Upload security scan results
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: build/reports/detekt/detekt.sarif
+
+    - name: Check API secrets are not committed
+      run: |
+        if grep -r "prod_key\|staging_key" --exclude-dir=.git --exclude="*.yml" --exclude="*.yaml" .; then
+          echo "❌ API keys found in code! Remove them immediately."
+          exit 1
+        fi
+        echo "✅ No API keys found in code"
+
+  # Unit Tests
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up JDK ${{ env.JAVA_VERSION }}
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ env.JAVA_VERSION }}
+        distribution: 'temurin'
+
+    - name: Cache Gradle dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+
+    - name: Run unit tests
+      run: ./gradlew testDevelopmentDebugUnitTest testStagingDebugUnitTest --continue
+
+    - name: Generate test coverage report
+      run: ./gradlew jacocoTestReport
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        files: ./app/build/reports/jacoco/test/jacocoTestReport.xml
+        fail_ci_if_error: false
+
+    - name: Check coverage threshold
+      run: |
+        COVERAGE=$(grep -o 'instruction.*covered.*>[0-9]*' app/build/reports/jacoco/test/html/index.html | grep -o '[0-9]*' | head -1)
+        if [ "$COVERAGE" -lt "80" ]; then
+          echo "❌ Coverage $COVERAGE% is below 80% threshold"
+          exit 1
+        fi
+        echo "✅ Coverage $COVERAGE% meets threshold"
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: unit-test-results
+        path: |
+          app/build/reports/tests/
+          app/build/test-results/
+
+  # Integration Tests with Android Emulator
+  integration-tests:
+    name: Integration Tests
+    runs-on: macos-latest
+    timeout-minutes: 45
+    
+    strategy:
+      matrix:
+        api-level: [30, 34]
+        
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up JDK ${{ env.JAVA_VERSION }}
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ env.JAVA_VERSION }}
+        distribution: 'temurin'
+
+    - name: Cache Gradle dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+
+    - name: Cache AVD
+      uses: actions/cache@v3
+      id: avd-cache
+      with:
+        path: |
+          ~/.android/avd/*
+          ~/.android/adb*
+        key: avd-${{ matrix.api-level }}
+
+    - name: Create AVD and generate snapshot for caching
+      if: steps.avd-cache.outputs.cache-hit != 'true'
+      uses: reactivecircus/android-emulator-runner@v2
+      with:
+        api-level: ${{ matrix.api-level }}
+        arch: x86_64
+        target: google_apis
+        force-avd-creation: false
+        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+        disable-animations: false
+        script: echo "Generated AVD snapshot for caching."
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+
+    - name: Run integration tests
+      uses: reactivecircus/android-emulator-runner@v2
+      with:
+        api-level: ${{ matrix.api-level }}
+        arch: x86_64
+        target: google_apis
+        emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+        disable-animations: true
+        script: |
+          ./gradlew connectedDevelopmentDebugAndroidTest \
+            -Pandroid.testInstrumentationRunnerArguments.package=com.fitnessapp.android.integration
+
+    - name: Upload integration test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: integration-test-results-api${{ matrix.api-level }}
+        path: |
+          app/build/reports/androidTests/
+          app/build/outputs/androidTest-results/
+
+  # Build APKs
+  build:
+    name: Build APKs
+    runs-on: ubuntu-latest
+    needs: [code-quality, unit-tests]
+    timeout-minutes: 30
+    
+    strategy:
+      matrix:
+        flavor: [development, staging, production]
+        build-type: [debug, release]
+        
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up JDK ${{ env.JAVA_VERSION }}
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ env.JAVA_VERSION }}
+        distribution: 'temurin'
+
+    - name: Cache Gradle dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+
+    - name: Decode keystore
+      if: matrix.build-type == 'release'
+      run: |
+        echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > keystore.jks
+      env:
+        KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+
+    - name: Build APK
+      run: |
+        if [ "${{ matrix.build-type }}" == "release" ]; then
+          ./gradlew assemble${{ matrix.flavor }}Release \
+            -Pandroid.injected.signing.store.file=keystore.jks \
+            -Pandroid.injected.signing.store.password="${{ secrets.KEYSTORE_PASSWORD }}" \
+            -Pandroid.injected.signing.key.alias="${{ secrets.KEY_ALIAS }}" \
+            -Pandroid.injected.signing.key.password="${{ secrets.KEY_PASSWORD }}"
+        else
+          ./gradlew assemble${{ matrix.flavor }}Debug
+        fi
+
+    - name: Upload APK
+      uses: actions/upload-artifact@v3
+      with:
+        name: apk-${{ matrix.flavor }}-${{ matrix.build-type }}
+        path: app/build/outputs/apk/${{ matrix.flavor }}/${{ matrix.build-type }}/*.apk
+
+    - name: Run APK analysis
+      run: |
+        APK_PATH=$(find app/build/outputs/apk -name "*.apk" | head -1)
+        if [ -f "$APK_PATH" ]; then
+          SIZE=$(stat -c%s "$APK_PATH")
+          echo "APK Size: $(( SIZE / 1024 / 1024 )) MB"
+          
+          # Check APK size limits
+          if [ "$SIZE" -gt 104857600 ]; then  # 100MB
+            echo "❌ APK size exceeds 100MB limit!"
+            exit 1
+          fi
+          echo "✅ APK size is within limits"
+        fi
+
+  # Performance Benchmarks
+  performance-tests:
+    name: Performance Tests
+    runs-on: macos-latest
+    needs: [build]
+    timeout-minutes: 60
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up JDK ${{ env.JAVA_VERSION }}
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ env.JAVA_VERSION }}
+        distribution: 'temurin'
+
+    - name: Cache Gradle dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+
+    - name: Download APK
+      uses: actions/download-artifact@v3
+      with:
+        name: apk-development-debug
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+
+    - name: Run performance benchmarks
+      uses: reactivecircus/android-emulator-runner@v2
+      with:
+        api-level: 34
+        arch: x86_64
+        target: google_apis
+        emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+        disable-animations: true
+        script: |
+          ./gradlew connectedDevelopmentDebugAndroidTest \
+            -Pandroid.testInstrumentationRunnerArguments.package=com.fitnessapp.android.performance
+
+    - name: Upload performance results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: performance-test-results
+        path: app/build/reports/androidTests/connected/
+
+  # Accessibility Tests
+  accessibility-tests:
+    name: Accessibility Tests
+    runs-on: macos-latest
+    needs: [build]
+    timeout-minutes: 45
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up JDK ${{ env.JAVA_VERSION }}
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ env.JAVA_VERSION }}
+        distribution: 'temurin'
+
+    - name: Cache Gradle dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+
+    - name: Download APK
+      uses: actions/download-artifact@v3
+      with:
+        name: apk-development-debug
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+
+    - name: Run accessibility tests
+      uses: reactivecircus/android-emulator-runner@v2
+      with:
+        api-level: 34
+        arch: x86_64
+        target: google_apis
+        emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+        disable-animations: true
+        script: |
+          ./gradlew connectedDevelopmentDebugAndroidTest \
+            -Pandroid.testInstrumentationRunnerArguments.package=com.fitnessapp.android.accessibility
+
+    - name: Upload accessibility results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: accessibility-test-results
+        path: app/build/reports/androidTests/connected/
+
+  # Security Tests
+  security-tests:
+    name: Security Tests
+    runs-on: ubuntu-latest
+    needs: [build]
+    timeout-minutes: 30
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download APK
+      uses: actions/download-artifact@v3
+      with:
+        name: apk-development-debug
+
+    - name: Run MobSF security analysis
+      uses: fundacaocerti/mobsf-action@v1.7.1
+      with:
+        input-file-path: app-development-debug.apk
+        mobsf-url: ${{ secrets.MOBSF_URL }}
+        mobsf-api-key: ${{ secrets.MOBSF_API_KEY }}
+
+    - name: Upload security results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: security-test-results
+        path: mobsf-report.json
+
+  # Test Summary and Notifications
+  test-summary:
+    name: Test Summary
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests, performance-tests, accessibility-tests, security-tests]
+    if: always()
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download all test results
+      uses: actions/download-artifact@v3
+
+    - name: Generate test summary
+      run: |
+        echo "# 🧪 Test Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Test Suite | Status | Coverage |" >> $GITHUB_STEP_SUMMARY
+        echo "|------------|--------|----------|" >> $GITHUB_STEP_SUMMARY
+        echo "| Unit Tests | ${{ needs.unit-tests.result }} | 80%+ |" >> $GITHUB_STEP_SUMMARY
+        echo "| Integration Tests | ${{ needs.integration-tests.result }} | - |" >> $GITHUB_STEP_SUMMARY
+        echo "| Performance Tests | ${{ needs.performance-tests.result }} | - |" >> $GITHUB_STEP_SUMMARY
+        echo "| Accessibility Tests | ${{ needs.accessibility-tests.result }} | - |" >> $GITHUB_STEP_SUMMARY
+        echo "| Security Tests | ${{ needs.security-tests.result }} | - |" >> $GITHUB_STEP_SUMMARY
+
+    - name: Notify Slack on failure
+      if: failure()
+      uses: 8398a7/action-slack@v3
+      with:
+        status: failure
+        text: "🚨 CI/CD Pipeline failed for ${{ github.repository }}"
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

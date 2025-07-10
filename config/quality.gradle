@@ -1,0 +1,238 @@
+// Code Quality Configuration for CI/CD Pipeline
+
+apply plugin: 'jacoco'
+apply plugin: 'com.github.spotbugs'
+apply plugin: 'io.gitlab.arturbosch.detekt'
+apply plugin: 'org.owasp.dependencycheck'
+
+// Jacoco Test Coverage Configuration
+jacoco {
+    toolVersion = "0.8.8"
+}
+
+tasks.register('jacocoTestReport', JacocoReport) {
+    group = "Reporting"
+    description = "Generate Jacoco coverage reports."
+    
+    dependsOn 'testDebugUnitTest'
+    
+    reports {
+        xml.required = true
+        html.required = true
+        csv.required = false
+        
+        xml.outputLocation = file("${buildDir}/reports/jacoco/test/jacocoTestReport.xml")
+        html.outputLocation = file("${buildDir}/reports/jacoco/test/html/")
+    }
+    
+    executionData fileTree(dir: buildDir, includes: [
+        'jacoco/testDebugUnitTest.exec',
+        'outputs/code_coverage/debugAndroidTest/connected/coverage.ec'
+    ])
+    
+    sourceDirectories.setFrom(files([
+        'src/main/java',
+        'src/main/kotlin'
+    ]))
+    
+    classDirectories.setFrom(files([
+        fileTree(dir: "${buildDir}/intermediates/javac/debug", excludes: [
+            '**/R.class',
+            '**/R$*.class',
+            '**/*$ViewInjector*.*',
+            '**/*$ViewBinder*.*',
+            '**/BuildConfig.*',
+            '**/Manifest*.*',
+            '**/*Module*.*',
+            '**/*Component*.*',
+            '**/*_Factory*.*',
+            '**/*_MembersInjector*.*',
+            '**/*_Provide*Factory*.*',
+            '**/*Test*.*',
+            'android/**/*.*'
+        ]),
+        fileTree(dir: "${buildDir}/tmp/kotlin-classes/debug", excludes: [
+            '**/R.class',
+            '**/R$*.class',
+            '**/*$ViewInjector*.*',
+            '**/*$ViewBinder*.*',
+            '**/BuildConfig.*',
+            '**/Manifest*.*',
+            '**/*Module*.*',
+            '**/*Component*.*',
+            '**/*_Factory*.*',
+            '**/*_MembersInjector*.*',
+            '**/*_Provide*Factory*.*',
+            '**/*Test*.*',
+            'android/**/*.*'
+        ])
+    ]))
+}
+
+// Coverage verification
+tasks.register('jacocoTestCoverageVerification', JacocoReport) {
+    dependsOn 'jacocoTestReport'
+    
+    violationRules {
+        rule {
+            limit {
+                minimum = 0.80  // 80% coverage requirement
+            }
+        }
+        
+        rule {
+            element = 'CLASS'
+            excludes = [
+                '*.R',
+                '*.R$*',
+                '*.BuildConfig',
+                '*Test*',
+                '*Module*',
+                '*Component*',
+                '*_Factory*',
+                '*_MembersInjector*'
+            ]
+            
+            limit {
+                counter = 'LINE'
+                value = 'COVEREDRATIO'
+                minimum = 0.70  // 70% line coverage per class
+            }
+        }
+    }
+}
+
+// SpotBugs Configuration
+spotbugs {
+    toolVersion = '4.7.3'
+    effort = 'max'
+    reportLevel = 'medium'
+    excludeFilter = file("${rootProject.projectDir}/config/spotbugs-exclude.xml")
+}
+
+tasks.withType(com.github.spotbugs.snom.SpotBugsTask) {
+    reports {
+        xml.required = false
+        html {
+            required = true
+            outputLocation = file("${buildDir}/reports/spotbugs/${name}.html")
+            stylesheet = 'fancy-hist.xsl'
+        }
+    }
+}
+
+// Detekt Configuration
+detekt {
+    toolVersion = "1.23.1"
+    config = files("${rootProject.projectDir}/config/detekt.yml")
+    buildUponDefaultConfig = true
+    allRules = false
+    
+    reports {
+        html.required = true
+        xml.required = false
+        txt.required = false
+        sarif.required = true
+        
+        html.outputLocation = file("${buildDir}/reports/detekt/detekt.html")
+        sarif.outputLocation = file("${buildDir}/reports/detekt/detekt.sarif")
+    }
+}
+
+tasks.withType(io.gitlab.arturbosch.detekt.Detekt).configureEach {
+    jvmTarget = "1.8"
+    exclude("**/build/**")
+}
+
+// OWASP Dependency Check Configuration
+dependencyCheck {
+    outputDirectory = "${buildDir}/reports/dependency-check"
+    format = 'ALL'
+    
+    analyzers {
+        archiveEnabled = true
+        assemblyEnabled = false
+        centralEnabled = true
+        nexusEnabled = false
+        pyDistributionEnabled = false
+        pyPackageEnabled = false
+        rubygemsEnabled = false
+        opensslEnabled = false
+        cmakeEnabled = false
+        autoconfEnabled = false
+        composerEnabled = false
+        nodeEnabled = false
+        nodeAuditEnabled = false
+        retirejs = [
+            enabled: false
+        ]
+    }
+    
+    suppressionFile = "${rootProject.projectDir}/config/dependency-check-suppressions.xml"
+    
+    failBuildOnCVSS = 7.0  // Fail build on HIGH severity vulnerabilities
+    
+    skipConfigurations = [
+        'lintClassPath',
+        'jacocoAgent',
+        'jacocoAnt',
+        'kotlinCompilerClasspath',
+        'kotlinCompilerPluginClasspath'
+    ]
+}
+
+// Android Lint Configuration
+android.lintOptions {
+    abortOnError true
+    warningsAsErrors false
+    checkAllWarnings true
+    checkReleaseBuilds false
+    ignoreWarnings false
+    
+    // Disable specific checks that are not relevant for CI
+    disable 'GoogleAppIndexingWarning',
+            'HardcodedDebugMode',
+            'IconExpectedSize',
+            'IconDuplicates',
+            'IconMissingDensityFolder',
+            'TypographyFractions',
+            'TypographyQuotes',
+            'SelectableText',
+            'ContentDescription',
+            'LabelFor',
+            'UselessParent'
+    
+    // Enable security-related checks
+    enable 'TrustAllX509TrustManager',
+           'BadHostnameVerifier',
+           'SSLCertificateSocketFactoryCreateSocket',
+           'SSLCertificateSocketFactoryGetInsecure',
+           'TrulyRandom',
+           'HardcodedValues'
+    
+    xmlReport true
+    htmlReport true
+    textReport false
+    
+    xmlOutput file("${buildDir}/reports/lint-results.xml")
+    htmlOutput file("${buildDir}/reports/lint-results.html")
+    
+    baseline file("${rootProject.projectDir}/config/lint-baseline.xml")
+}
+
+// Custom task to run all quality checks
+tasks.register('qualityCheck') {
+    group = 'verification'
+    description = 'Run all code quality checks'
+    
+    dependsOn 'detekt'
+    dependsOn 'spotbugsMain'
+    dependsOn 'lintDebug'
+    dependsOn 'jacocoTestReport'
+    dependsOn 'dependencyCheckAnalyze'
+}
+
+// Ensure quality checks run before build
+tasks.named('assemble').configure {
+    dependsOn 'qualityCheck'
+}

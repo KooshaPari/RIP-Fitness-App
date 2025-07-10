@@ -1,0 +1,558 @@
+name: Dependency Updates
+
+on:
+  schedule:
+    # Run dependency updates every Monday at 6 AM UTC
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      update-type:
+        description: 'Type of update to perform'
+        required: true
+        default: 'minor'
+        type: choice
+        options:
+        - patch
+        - minor
+        - major
+        - security-only
+
+env:
+  GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.workers.max=2"
+  JAVA_VERSION: 17
+
+jobs:
+  # Dependency Security Check
+  security-check:
+    name: Security Vulnerability Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    
+    outputs:
+      has-vulnerabilities: ${{ steps.vuln-check.outputs.has-vulnerabilities }}
+      vuln-count: ${{ steps.vuln-check.outputs.vuln-count }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up JDK ${{ env.JAVA_VERSION }}
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ env.JAVA_VERSION }}
+        distribution: 'temurin'
+
+    - name: Cache Gradle dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+
+    - name: Run vulnerability scan
+      id: vuln-check
+      run: |
+        ./gradlew dependencyCheckAnalyze
+        
+        # Check if vulnerabilities were found
+        if [ -f "build/reports/dependency-check/dependency-check-report.json" ]; then
+          VULN_COUNT=$(jq '.dependencies | map(.vulnerabilities) | flatten | length' build/reports/dependency-check/dependency-check-report.json)
+          if [ "$VULN_COUNT" -gt 0 ]; then
+            echo "has-vulnerabilities=true" >> $GITHUB_OUTPUT
+            echo "vuln-count=$VULN_COUNT" >> $GITHUB_OUTPUT
+            echo "⚠️ Found $VULN_COUNT vulnerabilities"
+          else
+            echo "has-vulnerabilities=false" >> $GITHUB_OUTPUT
+            echo "vuln-count=0" >> $GITHUB_OUTPUT
+            echo "✅ No vulnerabilities found"
+          fi
+        else
+          echo "has-vulnerabilities=false" >> $GITHUB_OUTPUT
+          echo "vuln-count=0" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Upload vulnerability report
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: vulnerability-report
+        path: build/reports/dependency-check/
+
+  # Check for Available Updates
+  check-updates:
+    name: Check Available Updates
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    outputs:
+      has-updates: ${{ steps.update-check.outputs.has-updates }}
+      update-summary: ${{ steps.update-check.outputs.update-summary }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up JDK ${{ env.JAVA_VERSION }}
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ env.JAVA_VERSION }}
+        distribution: 'temurin'
+
+    - name: Cache Gradle dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+
+    - name: Check for dependency updates
+      id: update-check
+      run: |
+        # Create Gradle script to check for updates
+        cat > check-updates.gradle << 'EOF'
+        plugins {
+          id 'com.github.ben-manes.versions' version '0.50.0'
+        }
+        
+        apply from: 'build.gradle.kts'
+        
+        dependencyUpdates {
+          checkForGradleUpdate = true
+          outputFormatter = 'json'
+          outputDir = 'build/dependencyUpdates'
+          reportfileName = 'report'
+          
+          rejectVersionIf {
+            ['alpha', 'beta', 'rc', 'cr', 'm', 'preview', 'b', 'ea'].any { qualifier ->
+              it.candidate.version ==~ /(?i).*[.-]${qualifier}[.\d-+]*/
+            }
+          }
+        }
+        EOF
+        
+        # Run dependency updates check
+        ./gradlew -b check-updates.gradle dependencyUpdates
+        
+        # Parse results
+        if [ -f "build/dependencyUpdates/report.json" ]; then
+          OUTDATED_COUNT=$(jq '.outdated.count' build/dependencyUpdates/report.json)
+          if [ "$OUTDATED_COUNT" -gt 0 ]; then
+            echo "has-updates=true" >> $GITHUB_OUTPUT
+            
+            # Generate update summary
+            SUMMARY=$(jq -r '.outdated.dependencies[] | "- \(.group):\(.name) \(.version) → \(.available.milestone // .available.release)"' build/dependencyUpdates/report.json | head -20)
+            echo "update-summary<<EOF" >> $GITHUB_OUTPUT
+            echo "$SUMMARY" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+            
+            echo "✅ Found $OUTDATED_COUNT available updates"
+          else
+            echo "has-updates=false" >> $GITHUB_OUTPUT
+            echo "✅ All dependencies are up to date"
+          fi
+        else
+          echo "has-updates=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Upload update report
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: dependency-updates-report
+        path: build/dependencyUpdates/
+
+  # Apply Security Updates
+  apply-security-updates:
+    name: Apply Security Updates
+    runs-on: ubuntu-latest
+    needs: [security-check]
+    if: needs.security-check.outputs.has-vulnerabilities == 'true' || github.event.inputs.update-type == 'security-only'
+    timeout-minutes: 30
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Set up JDK ${{ env.JAVA_VERSION }}
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ env.JAVA_VERSION }}
+        distribution: 'temurin'
+
+    - name: Cache Gradle dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+
+    - name: Apply security updates
+      run: |
+        echo "🔒 Applying security updates..."
+        
+        # Download vulnerability report from previous job
+        # For now, we'll do manual security updates based on known patterns
+        
+        # Update common vulnerable dependencies
+        UPDATED_FILES=""
+        
+        # Update Gradle wrapper if vulnerable
+        GRADLE_VERSION=$(./gradlew -v | grep "Gradle" | cut -d' ' -f2)
+        if [[ "$GRADLE_VERSION" < "8.0" ]]; then
+          ./gradlew wrapper --gradle-version=8.5
+          UPDATED_FILES="$UPDATED_FILES gradle/wrapper/gradle-wrapper.properties"
+        fi
+        
+        # Update common Android dependencies with known security fixes
+        for BUILD_FILE in app/build.gradle.kts core/*/build.gradle.kts; do
+          if [ -f "$BUILD_FILE" ]; then
+            # Update OkHttp to latest secure version
+            sed -i 's/okhttp:4\.[0-9]\+\.[0-9]\+/okhttp:4.12.0/g' "$BUILD_FILE"
+            
+            # Update Retrofit to latest secure version
+            sed -i 's/retrofit:2\.[0-9]\+\.[0-9]\+/retrofit:2.9.0/g' "$BUILD_FILE"
+            
+            # Update Jackson if present (known vulnerabilities)
+            sed -i 's/jackson-databind:2\.[0-9]\+\.[0-9]\+/jackson-databind:2.16.1/g' "$BUILD_FILE"
+            
+            UPDATED_FILES="$UPDATED_FILES $BUILD_FILE"
+          fi
+        done
+        
+        echo "updated-files=$UPDATED_FILES" >> $GITHUB_ENV
+
+    - name: Test security updates
+      run: |
+        echo "🧪 Testing security updates..."
+        ./gradlew clean assembleDebug testDebugUnitTest --no-daemon
+
+    - name: Create security update PR
+      if: env.updated-files != ''
+      uses: peter-evans/create-pull-request@v5
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        commit-message: |
+          🔒 Security: Update vulnerable dependencies
+          
+          - Applied security updates to ${{ needs.security-check.outputs.vuln-count }} vulnerable dependencies
+          - Updated files: ${{ env.updated-files }}
+          
+          Auto-generated by dependency update workflow
+        title: '🔒 Security: Update vulnerable dependencies'
+        body: |
+          ## 🔒 Security Dependency Updates
+          
+          This PR contains security updates for vulnerable dependencies.
+          
+          **Vulnerabilities Found:** ${{ needs.security-check.outputs.vuln-count }}
+          **Files Updated:** 
+          ${{ env.updated-files }}
+          
+          ### Security Scan Results
+          Please review the vulnerability report in the workflow artifacts.
+          
+          ### Testing
+          - ✅ Build passes
+          - ✅ Unit tests pass
+          
+          **⚠️ This PR should be reviewed and merged as soon as possible due to security implications.**
+        branch: security/dependency-updates-${{ github.run_number }}
+        labels: |
+          security
+          dependencies
+          high-priority
+        reviewers: |
+          team-leads
+        assignees: |
+          security-team
+
+  # Apply Regular Updates
+  apply-regular-updates:
+    name: Apply Regular Updates
+    runs-on: ubuntu-latest
+    needs: [check-updates]
+    if: needs.check-updates.outputs.has-updates == 'true' && github.event.inputs.update-type != 'security-only'
+    timeout-minutes: 45
+    
+    strategy:
+      matrix:
+        update-type: [patch, minor]
+        
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Set up JDK ${{ env.JAVA_VERSION }}
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ env.JAVA_VERSION }}
+        distribution: 'temurin'
+
+    - name: Cache Gradle dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+
+    - name: Apply ${{ matrix.update-type }} updates
+      run: |
+        echo "📦 Applying ${{ matrix.update-type }} updates..."
+        
+        # Use Gradle versions plugin to apply updates
+        cat > apply-updates.gradle << 'EOF'
+        plugins {
+          id 'com.github.ben-manes.versions' version '0.50.0'
+          id 'se.patrikerdes.use-latest-versions' version '0.2.18'
+        }
+        
+        apply from: 'build.gradle.kts'
+        
+        dependencyUpdates {
+          rejectVersionIf {
+            def type = '${{ matrix.update-type }}'
+            def current = it.currentVersion.tokenize('.')
+            def candidate = it.candidate.version.tokenize('.')
+            
+            if (type == 'patch') {
+              // Only allow patch updates (same major.minor)
+              return current[0] != candidate[0] || current[1] != candidate[1]
+            } else if (type == 'minor') {
+              // Only allow minor updates (same major)
+              return current[0] != candidate[0]
+            }
+            
+            // Reject unstable versions
+            ['alpha', 'beta', 'rc', 'cr', 'm', 'preview', 'b', 'ea'].any { qualifier ->
+              it.candidate.version ==~ /(?i).*[.-]${qualifier}[.\d-+]*/
+            }
+          }
+        }
+        EOF
+        
+        # Apply the updates
+        ./gradlew -b apply-updates.gradle useLatestVersions
+        
+        # Check if any files were modified
+        if git diff --quiet; then
+          echo "no-updates=true" >> $GITHUB_ENV
+        else
+          echo "no-updates=false" >> $GITHUB_ENV
+        fi
+
+    - name: Test updated dependencies
+      if: env.no-updates == 'false'
+      run: |
+        echo "🧪 Testing updated dependencies..."
+        ./gradlew clean assembleDebug testDebugUnitTest --no-daemon
+
+    - name: Run integration tests
+      if: env.no-updates == 'false'
+      uses: reactivecircus/android-emulator-runner@v2
+      with:
+        api-level: 34
+        arch: x86_64
+        target: google_apis
+        emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+        disable-animations: true
+        script: |
+          ./gradlew connectedDevelopmentDebugAndroidTest \
+            -Pandroid.testInstrumentationRunnerArguments.package=com.fitnessapp.android.integration
+
+    - name: Create regular update PR
+      if: env.no-updates == 'false'
+      uses: peter-evans/create-pull-request@v5
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        commit-message: |
+          📦 Dependencies: Update ${{ matrix.update-type }} versions
+          
+          - Applied ${{ matrix.update-type }} updates to dependencies
+          - All tests pass
+          
+          Auto-generated by dependency update workflow
+        title: '📦 Dependencies: Update ${{ matrix.update-type }} versions'
+        body: |
+          ## 📦 ${{ matrix.update-type }} Dependency Updates
+          
+          This PR contains ${{ matrix.update-type }} version updates for dependencies.
+          
+          ### Available Updates
+          ${{ needs.check-updates.outputs.update-summary }}
+          
+          ### Testing
+          - ✅ Build passes
+          - ✅ Unit tests pass
+          - ✅ Integration tests pass
+          
+          ### Review Notes
+          - These are ${{ matrix.update-type }} version updates which should be backward compatible
+          - Please review the changelog for any breaking changes
+          - Consider running additional manual testing before merging
+        branch: dependencies/${{ matrix.update-type }}-updates-${{ github.run_number }}
+        labels: |
+          dependencies
+          ${{ matrix.update-type }}-update
+        reviewers: |
+          team-leads
+
+  # Gradle Wrapper Update
+  gradle-wrapper-update:
+    name: Update Gradle Wrapper
+    runs-on: ubuntu-latest
+    if: github.event.inputs.update-type == 'gradle' || github.event_name == 'schedule'
+    timeout-minutes: 20
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Set up JDK ${{ env.JAVA_VERSION }}
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ env.JAVA_VERSION }}
+        distribution: 'temurin'
+
+    - name: Check current Gradle version
+      id: gradle-version
+      run: |
+        CURRENT_VERSION=$(./gradlew -v | grep "Gradle" | cut -d' ' -f2)
+        echo "current-version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+        
+        # Get latest Gradle version
+        LATEST_VERSION=$(curl -s https://api.github.com/repos/gradle/gradle/releases/latest | jq -r '.tag_name' | sed 's/v//')
+        echo "latest-version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+        
+        if [ "$CURRENT_VERSION" != "$LATEST_VERSION" ]; then
+          echo "needs-update=true" >> $GITHUB_OUTPUT
+        else
+          echo "needs-update=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Update Gradle wrapper
+      if: steps.gradle-version.outputs.needs-update == 'true'
+      run: |
+        echo "📦 Updating Gradle wrapper from ${{ steps.gradle-version.outputs.current-version }} to ${{ steps.gradle-version.outputs.latest-version }}"
+        ./gradlew wrapper --gradle-version=${{ steps.gradle-version.outputs.latest-version }}
+
+    - name: Test Gradle update
+      if: steps.gradle-version.outputs.needs-update == 'true'
+      run: |
+        echo "🧪 Testing Gradle wrapper update..."
+        ./gradlew clean assembleDebug testDebugUnitTest --no-daemon
+
+    - name: Create Gradle update PR
+      if: steps.gradle-version.outputs.needs-update == 'true'
+      uses: peter-evans/create-pull-request@v5
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        commit-message: |
+          📦 Gradle: Update wrapper to ${{ steps.gradle-version.outputs.latest-version }}
+          
+          - Updated Gradle wrapper from ${{ steps.gradle-version.outputs.current-version }} to ${{ steps.gradle-version.outputs.latest-version }}
+          - All tests pass
+          
+          Auto-generated by dependency update workflow
+        title: '📦 Gradle: Update wrapper to ${{ steps.gradle-version.outputs.latest-version }}'
+        body: |
+          ## 📦 Gradle Wrapper Update
+          
+          This PR updates the Gradle wrapper to the latest version.
+          
+          **Current Version:** ${{ steps.gradle-version.outputs.current-version }}
+          **New Version:** ${{ steps.gradle-version.outputs.latest-version }}
+          
+          ### Testing
+          - ✅ Build passes
+          - ✅ Unit tests pass
+          
+          ### Review Notes
+          - Please review the Gradle release notes for any breaking changes
+          - Consider running full test suite before merging
+        branch: gradle/wrapper-update-${{ steps.gradle-version.outputs.latest-version }}
+        labels: |
+          dependencies
+          gradle
+        reviewers: |
+          team-leads
+
+  # Dependency Update Summary
+  update-summary:
+    name: Update Summary
+    runs-on: ubuntu-latest
+    needs: [security-check, check-updates, apply-security-updates, apply-regular-updates, gradle-wrapper-update]
+    if: always()
+    timeout-minutes: 10
+    
+    steps:
+    - name: Generate update summary
+      run: |
+        echo "# 📦 Dependency Update Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Update Date:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+        echo "**Trigger:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        echo "## 📊 Update Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Update Type | Status | Details |" >> $GITHUB_STEP_SUMMARY
+        echo "|-------------|--------|---------|" >> $GITHUB_STEP_SUMMARY
+        echo "| Security Check | ${{ needs.security-check.result }} | ${{ needs.security-check.outputs.vuln-count }} vulnerabilities |" >> $GITHUB_STEP_SUMMARY
+        echo "| Available Updates | ${{ needs.check-updates.result }} | ${{ needs.check-updates.outputs.has-updates }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Security Updates | ${{ needs.apply-security-updates.result }} | Applied if needed |" >> $GITHUB_STEP_SUMMARY
+        echo "| Regular Updates | ${{ needs.apply-regular-updates.result }} | Patch and minor |" >> $GITHUB_STEP_SUMMARY
+        echo "| Gradle Update | ${{ needs.gradle-wrapper-update.result }} | Wrapper version |" >> $GITHUB_STEP_SUMMARY
+
+    - name: Notify on security updates
+      if: needs.security-check.outputs.has-vulnerabilities == 'true'
+      uses: 8398a7/action-slack@v3
+      with:
+        status: custom
+        custom_payload: |
+          {
+            "text": "🔒 Security Dependency Updates Available",
+            "attachments": [{
+              "color": "warning",
+              "fields": [{
+                "title": "Vulnerabilities Found",
+                "value": "${{ needs.security-check.outputs.vuln-count }}",
+                "short": true
+              }, {
+                "title": "Repository",
+                "value": "${{ github.repository }}",
+                "short": true
+              }]
+            }]
+          }
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

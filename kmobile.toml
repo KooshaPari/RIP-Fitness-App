@@ -1,0 +1,31 @@
+name = "KMobile"
+version = "0.1.0"
+projects = []
+
+[android]
+
+[ios]
+
+[testing]
+framework = "kmobile"
+timeout = 30
+parallel = true
+screenshot_on_failure = true
+video_recording = false
+output_dir = "./test-results"
+
+[mcp]
+enabled = true
+port = 3001
+host = "localhost"
+tools = [
+    "device_list",
+    "simulator_control",
+    "app_deploy",
+    "test_run",
+]
+
+[api]
+enabled = true
+port = 3000
+host = "localhost"
