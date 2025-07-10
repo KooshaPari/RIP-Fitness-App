@@ -304,6 +304,67 @@ dependencies {
     // Accessibility testing
     androidTestImplementation("com.google.android.apps.common.testing.accessibility.framework:accessibility-test-framework:4.0.0")
     
+    // Material Design 3 Advanced Components
+    implementation("androidx.compose.material3:material3-adaptive:1.0.0-alpha02")
+    implementation("androidx.compose.material3:material3-adaptive-navigation-suite:1.0.0-alpha01")
+    implementation("androidx.compose.material3:material3-window-size-class:1.1.2")
+    
+    // Performance & Optimization
+    implementation("androidx.profileinstaller:profileinstaller:1.3.1")
+    implementation("androidx.compose.runtime:runtime-tracing:1.0.0-beta01")
+    implementation("androidx.tracing:tracing-perfetto:1.0.0")
+    implementation("androidx.tracing:tracing-perfetto-binary:1.0.0")
+    
+    // Haptic Feedback & Accessibility
+    implementation("androidx.compose.ui:ui-haptic-feedback:1.6.0-beta01")
+    implementation("androidx.compose.ui:ui-semantics:1.5.4")
+    implementation("androidx.compose.foundation:foundation-layout:1.5.4")
+    
+    // Voice & Speech
+    implementation("androidx.speech:speech-ktx:1.0.0-alpha03")
+    
+    // ML Kit & Smart Features
+    implementation("com.google.mlkit:smart-reply:17.0.2")
+    implementation("com.google.mlkit:language-id:17.0.4")
+    
+    // Advanced Notifications
+    implementation("androidx.core:core-google-shortcuts:1.1.0")
+    implementation("androidx.slice:slice-core:1.1.0-alpha02")
+    
+    // Wear OS Support
+    implementation("androidx.wear.compose:compose-material:1.2.1")
+    implementation("androidx.wear.compose:compose-foundation:1.2.1")
+    implementation("androidx.wear.watchface:watchface-complications-data-source-ktx:1.1.1")
+    
+    // Advanced Graphics & Animation
+    implementation("androidx.compose.animation:animation-graphics:1.5.4")
+    implementation("androidx.dynamicanimation:dynamicanimation:1.0.0")
+    implementation("com.airbnb.android:lottie-compose:6.1.0")
+    
+    // APK Size Optimization
+    implementation("androidx.startup:startup-runtime:1.1.1")
+    
+    // Multi-language Support
+    implementation("androidx.appcompat:appcompat:1.6.1")
+    implementation("androidx.core:core-i18n:1.0.0-alpha01")
+    
+    // Advanced Caching
+    implementation("com.squareup.okhttp3:okhttp-sse:4.12.0")
+    implementation("androidx.paging:paging-compose:3.2.1")
+    
+    // Error Reporting & Analytics
+    implementation("com.google.firebase:firebase-perf-ktx")
+    implementation("com.google.firebase:firebase-config-ktx")
+    implementation("com.google.firebase:firebase-messaging-ktx")
+    
+    // Feature Flags
+    implementation("com.google.firebase:firebase-config-ktx")
+    
+    // Debug Tools
+    debugImplementation("com.facebook.flipper:flipper:0.212.0")
+    debugImplementation("com.facebook.soloader:soloader:0.10.5")
+    debugImplementation("com.squareup.leakcanary:leakcanary-android:2.12")
+    
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
